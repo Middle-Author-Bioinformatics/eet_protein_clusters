@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pfam/custom HMM profiling, per-cluster prevalence, and within-protein domain networks."""
+"""Profile domains and co-occurrence in one protein FASTA or a folder of clusters."""
 import argparse
 from collections import Counter,defaultdict
 import csv
@@ -10,6 +10,7 @@ import json
 import logging
 import math
 from pathlib import Path
+import shutil
 import sqlite3
 import sys
 from common import (LOG,normalize,sha256,signature,writer,dump,versions,
@@ -24,16 +25,28 @@ def label(value):
     return value.decode() if isinstance(value,bytes) else str(value or '')
 
 
+def fasta_label(path):
+    name=path.name.removesuffix('.gz').rsplit('.',1)[0]
+    if name in ['', '.', '..']:raise ValueError(f'Unsafe/empty protein collection name: {path.name}')
+    return name
+
+
 def find_clusters(directory):
     paths=sorted(p for p in directory.iterdir() if p.is_file() and any(p.name.endswith(s) for s in ['.faa','.fa','.fasta','.faa.gz','.fa.gz','.fasta.gz']))
     if not paths:raise ValueError(f'{directory}: no cluster FASTA files found')
     files=[];seen=set()
     for path in paths:
-        name=path.name.removesuffix('.gz').rsplit('.',1)[0]
-        if name in ['', '.', '..']:raise ValueError(f'Unsafe/empty cluster name: {path.name}')
+        name=fasta_label(path)
         if name in seen:raise ValueError(f'Duplicate cluster stem: {name}')
         seen.add(name);files.append((name,path))
     return files
+
+
+def resolve_input(path):
+    """A single FASTA is one collection, not a request to cluster its proteins."""
+    if path.is_file():return 'proteins',[(fasta_label(path),path)]
+    if path.is_dir():return 'clusters',find_clusters(path)
+    raise ValueError(f'{path}: input must be an existing protein FASTA file or cluster folder')
 
 
 def model_inventory(hmm_path,db,evalue):
@@ -155,8 +168,12 @@ def draw_network(graph,path,max_nodes,max_edges,cluster,total):
     ax.axis('off');fig.tight_layout();fig.savefig(path,format='svg',bbox_inches='tight');plt.close(fig)
 
 
-def summarize(db,out,args):
+def summarize(db,out,args,input_mode='clusters'):
     import networkx as nx
+    standalone=input_mode=='proteins'
+    # Clear convenience exports when switching modes or disabling plots on resume.
+    for name in ['cooccurrence_edges.tsv','domain_network.graphml','domain_network.svg']:
+        (out/name).unlink(missing_ok=True)
     if (out/'clusters').exists():
         for old in (out/'clusters').iterdir():
             if old.is_dir():
@@ -199,7 +216,7 @@ def summarize(db,out,args):
     try:
         for c,n in clusters.items():
             folder=out/'clusters'/c;folder.mkdir(parents=True,exist_ok=True)
-            graph=nx.Graph(cluster=c,cluster_proteins=n,definition='Domains co-occur in the same protein; repeats count once per protein for edges')
+            graph=nx.Graph(cluster=c,cluster_proteins=n,input_mode=input_mode,definition='Domains co-occur in the same protein; repeats count once per protein for edges')
             rows=[]
             for a,k in sorted(counts[c].items(),key=lambda item:(-item[1],item[0])):
                 outside_n=total-n;outside_k=global_counts[a]-k
@@ -224,6 +241,9 @@ def summarize(db,out,args):
             ef.close()
             nx.write_graphml(graph,folder/'domain_network.graphml')
             if not args.no_plots:draw_network(graph,folder/'domain_network.svg',args.max_plot_nodes,args.max_plot_edges,c,n)
+            if standalone:
+                for name in ['cooccurrence_edges.tsv','domain_network.graphml']+([] if args.no_plots else ['domain_network.svg']):
+                    shutil.copyfile(folder/name,out/name)
             top=max(counts[c],key=lambda a:counts[c][a]) if counts[c] else ''
             summary=dict(cluster=c,n_proteins=n,proteins_with_domains=with_domain[c],fraction_with_domains=with_domain[c]/n,
                          distinct_domains=len(counts[c]),domain_copies=sum(copies[c].values()),cooccurrence_pairs=len(pairs[c]),
@@ -231,6 +251,9 @@ def summarize(db,out,args):
             sw.writerow(summary);rows_for_html.append(summary)
     finally:sf.close();lf.close()
     text='''<!doctype html><html lang="en"><meta charset="utf-8"><title>Protein cluster domain profiles</title><style>body{font:15px system-ui;margin:30px;color:#244}td,th{padding:8px;border:1px solid #ccd}table{border-collapse:collapse}input{padding:10px;margin:10px}a{color:#08796c}</style><h1>Protein cluster domain profiles</h1><p>Prevalence uses all cluster proteins, including proteins with no detected domains. Edges mean domains in the same protein; repeats do not multiply edges. These are descriptive associations, not evidence of physical interaction, operons or EET activity.</p><input id="q" placeholder="Search clusters"><table><thead><tr>'''
+    if standalone:
+        text=text.replace('Protein cluster domain profiles','Protein domain profile').replace('all cluster proteins','all input proteins').replace('Search clusters','Search collection')
+        text=text.replace('<table>', '<p>Single-FASTA input: all proteins form one collection; no sequence clustering was performed. The cluster column stores the input filename stem. Outside-cluster comparisons are unavailable.</p><table>',1)
     fields=list(rows_for_html[0]) if rows_for_html else []
     text+=''.join('<th>'+html.escape(k)+'</th>' for k in fields)+'<th>Files</th></tr></thead><tbody>'
     from urllib.parse import quote
@@ -248,12 +271,15 @@ def run(args):
     if not all(math.isfinite(x) for x in [args.min_model_coverage,args.overlap_fraction]+([args.domain_evalue] if args.domain_evalue is not None else [])):raise ValueError('Numeric parameters must be finite')
     if args.threads<1 or args.model_batch_size<1 or not 0<=args.min_model_coverage<=1 or not 0<args.overlap_fraction<=1 or args.min_pair_count<1 or args.max_plot_nodes<1 or args.max_plot_edges<0 or (args.domain_evalue is not None and args.domain_evalue<=0):
         raise ValueError('Invalid threads/batch-size/coverage/overlap/network limits or E-value')
+    input_mode,files=resolve_input(args.input)
+    if any(args.output.resolve() in path.resolve().parents for _,path in files):
+        raise ValueError('Choose an output directory that does not contain the input protein files')
     log=prepare_output(args.output,args.resume,args.force);db=None
     try:
         import pyhmmer
-        if args.output.resolve()==args.clusters.resolve():raise ValueError('Choose an output directory different from the input cluster folder')
-        files=find_clusters(args.clusters)
         manifest=base_manifest(args);manifest['software']=versions(['biopython','pyhmmer','networkx','matplotlib'])
+        manifest['input_mode']=input_mode
+        manifest['protein_collections']=[name for name,_ in files]
         manifest['input_sha256']={str(p.resolve()):sha256(p) for _,p in files}
         manifest['hmm_sha256']=sha256(args.hmm);manifest['search_options']={}
         work=args.output/'work';work.mkdir(exist_ok=True)
@@ -278,13 +304,13 @@ def run(args):
             target=sqlite3.connect(search_db);db.backup(target);target.close()
             mark_stage(stamp,key,[search_db,raw])
         # Persist the search definition even on reuse.
-        manifest['search_definition']=dict(algorithm='PyHMMER hmmsearch on combined cluster proteins',
+        manifest['search_definition']=dict(algorithm='PyHMMER hmmsearch on input proteins' if input_mode=='proteins' else 'PyHMMER hmmsearch on combined cluster proteins',
                                           ga_preferred=True,fallback_evalue=args.domain_evalue,total_proteins=total,
                                           models=db.execute('SELECT COUNT(*) FROM models').fetchone()[0],cache_reused=reuse)
         mf,mw=writer(args.output/'model_inventory.tsv',['accession','name','model_length','threshold','mode'])
         for row in db.execute('SELECT * FROM models ORDER BY accession'):mw.writerow(dict(zip(['accession','name','model_length','threshold','mode'],row)))
         mf.close()
-        manifest['counts']=summarize(db,args.output,args)
+        manifest['counts']=summarize(db,args.output,args,input_mode=input_mode)
         manifest['interpretation']='Prevalence and within-protein domain co-occurrence; no statistical enrichment significance or physical interaction inferred'
         manifest['output_sha256']={p.name:sha256(p) for p in args.output.glob('*.tsv')}
         finish(args.output,manifest);LOG.info('Finished: %s',args.output/'index.html')
@@ -295,7 +321,7 @@ def run(args):
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument('-i','--clusters',type=Path,required=True,help='Folder of cluster FASTA files (e.g. first script output/clusters)')
+    p.add_argument('-i','--input','--clusters',dest='input',type=Path,required=True,help='Protein FASTA (.faa/.faa.gz) or folder of cluster FASTAs; --clusters remains an alias')
     p.add_argument('--hmm',type=Path,required=True,help='Pfam-A.hmm or custom HMM database; decompress .gz first')
     p.add_argument('-o','--output',type=Path,required=True,help='Output profile directory')
     p.add_argument('-t','--threads',type=int,default=8,help='HMM search threads')
