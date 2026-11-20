@@ -1,5 +1,33 @@
 # Validation
 
+## Standalone FASTA extension (version 1.1.0)
+
+The current suite reports **20 passed, 2 skipped** on Linux/Python 3.12 with
+BioPython 1.88, PyHMMER 0.12.3, NetworkX 3.7 and Matplotlib 3.10.8.
+The two existing external DIAMOND/MCL tests skipped because those executables
+were unavailable in this session; no clustering implementation was changed.
+The domain tests executed the real PyHMMER search engine against controlled HMMs.
+
+Seven new tests cover:
+
+- Identical prevalence, raw hits, architectures and summaries for a single FASTA
+  and the equivalent one-cluster folder, including repeated domains and proteins
+  without hits in the denominator.
+- Standalone GraphML/SVG/co-occurrence exports, explicit input-mode metadata,
+  single-collection report wording and unavailable outside-collection statistics.
+- Gzipped FASTA input, a path containing spaces, actual subprocess CLI execution,
+  completed-search cache reuse and preservation of original protein IDs.
+- Removal of stale root SVGs with `--no-plots`, and removal of standalone exports
+  when resuming the same output folder with a cluster-folder input.
+- A domain-negative single-FASTA collection with a zero-domain summary and empty graph.
+- Empty and duplicate-ID FASTAs rejected without a successful completion manifest.
+- Missing input paths and output directories containing input files rejected safely.
+
+`--input`, `-i`, and the existing `--clusters` alias are exercised. Full Pfam-A
+and a user-supplied biological collection were not run for this extension.
+
+## Original workflow validation (version 1.0.0)
+
 Validated on Linux with Python 3.12, BioPython 1.88, PyHMMER 0.12.3,
 NetworkX 3.7, Matplotlib 3.10.8 and pytest 9.2.0.
 

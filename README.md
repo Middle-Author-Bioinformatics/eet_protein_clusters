@@ -4,8 +4,9 @@ Two scripts for an already selected collection of candidate EET-related proteins
 
 1. **cluster_proteins.py**: protein FASTA -> DIAMOND all-versus-all similarity ->
    MCL clustering -> one FASTA per cluster, including singletons.
-2. **cluster_domains.py**: cluster FASTAs -> Pfam/custom HMM searches -> per-cluster
-   domain prevalence, repeated-domain statistics and within-protein co-occurrence networks.
+2. **cluster_domains.py**: a single protein FASTA **or** cluster FASTA folder ->
+   Pfam/custom HMM searches -> domain prevalence, repeated-domain statistics and
+   within-protein co-occurrence networks. Single-file mode does not require clustering.
 
 Keep `common.py` alongside the two scripts. No genome coordinates, earlier EET
 wrapper, FeGenie checkout, or web submission is required. No new EET activity
@@ -40,13 +41,20 @@ GitHub development tree requires additional build machinery and cimfomfa. You do
 not need to compile that tree for these scripts. See
 https://github.com/micans/mcl#installation-mcl-versions-and-linux-packages.
 
-For an existing environment that already has `mcl`, `mcxload` and `diamond`:
+For **standalone domain profiling**, only the Python dependencies are needed.
+You can use an existing Python environment or create a fresh one:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-PyHMMER includes the HMMER search engine, so this workflow does not require a
+The same requirements file also works in an existing clustering environment.
+`mcl`, `mcxload` and `diamond` are required only by `cluster_proteins.py`.
+Keep `common.py` next to `cluster_domains.py` when copying it elsewhere.
+
+PyHMMER includes the HMMER search engine, so domain profiling does not require a
 separate `hmmsearch` executable or `hmmpress`. No restricted localization software
 is required. MCL and DIAMOND remain independently installed external programs;
 no third-party executable or model is distributed in this package.
@@ -188,6 +196,45 @@ counting the same family as separate domains.
 
 ## 4. Profile domains and generate networks
 
+### Standalone protein FASTA
+
+You can profile an arbitrary protein collection directly, without running
+`cluster_proteins.py` or installing MCL/DIAMOND:
+
+```bash
+python cluster_domains.py \
+  --input /path/to/eet_proteins.faa \
+  --hmm databases/Pfam-A.hmm \
+  --output /path/to/eet_protein_domains \
+  --threads 32 \
+  --resume
+```
+
+`.faa.gz` inputs work as well. `-i` is shorthand for `--input`; the existing
+`--clusters` spelling remains an alias for compatibility. Input type is detected
+from whether the path is a file or directory.
+
+All proteins in the file form **one collection**. Prevalence uses every input
+protein, including those with no detected domains. Repeats, overlap handling,
+gathering thresholds, raw hits and within-protein co-occurrence use the same
+analysis as folder mode. No sequence clustering is performed or inferred.
+
+The `cluster` columns and `cluster_summary.tsv` filename are retained for output
+compatibility; in standalone mode their label is the FASTA filename stem
+(`eet_proteins.faa.gz` -> `eet_proteins`). Since no outside collection is supplied,
+outside-cluster prevalence and prevalence ratios are `NA`.
+
+In addition to the shared output files below, standalone mode writes
+`cooccurrence_edges.tsv`, `domain_network.graphml` and `domain_network.svg`
+directly in the output folder. The SVG is omitted with `--no-plots`. These are
+copies of the corresponding files in `clusters/<filename_stem>/`; `index.html`
+labels the run as single-FASTA profiling. The manifest records `input_mode=proteins`
+and the collection label. Folder inputs record `input_mode=clusters`.
+
+Use a separate output directory that does not contain your input protein files.
+
+### Existing cluster folder
+
 ```bash
 python cluster_domains.py \
   --clusters /path/to/eet_mcl/clusters \
@@ -197,9 +244,10 @@ python cluster_domains.py \
   --resume
 ```
 
-Every protein is searched. The script searches the **combined collection once**
-and aggregates results by cluster, rather than launching a complete Pfam scan for
-every small cluster. This shares the same target-database size for all E-values.
+Every protein is searched. For folder inputs, the script searches the **combined
+collection once** and aggregates results by cluster, rather than launching a
+complete Pfam scan for every small cluster. This shares the same target-database
+size for all E-values. Single-file inputs use the whole input file as the target database.
 It reads HMMs in batches; by default the digital protein sequences are held in RAM.
 `--low-memory` streams protein targets from disk, trading memory for repeated I/O.
 `--model-batch-size` controls the number of HMMs in memory at a time.
