@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 LOG = logging.getLogger('eet-clusters')
 
 
@@ -111,7 +111,7 @@ def open_fasta(path):
     return gzip.open(path,'rt') if str(path).lower().endswith('.gz') else open(path)
 
 
-def normalize(files, fasta_path, database_path, mapping_path):
+def normalize(files, fasta_path, database_path, mapping_path, include_cluster=True):
     """Stream sequences to FASTA and disk-backed index; IDs unique across all files.
 
     files is a list of (cluster_label, path). Original headers are retained in SQL.
@@ -122,7 +122,7 @@ def normalize(files, fasta_path, database_path, mapping_path):
     db=sqlite3.connect(database_path)
     db.execute('CREATE TABLE proteins (n INTEGER PRIMARY KEY, internal TEXT UNIQUE, original TEXT UNIQUE, header TEXT, length INTEGER, cluster TEXT)')
     n=0
-    mf,mw=writer(mapping_path,['internal_id','protein_id','cluster','length_aa','original_header'])
+    mf,mw=writer(mapping_path,['internal_id','protein_id']+(['cluster'] if include_cluster else [])+['length_aa','original_header'])
     try:
         with open(fasta_path,'w') as dest:
             for cluster,path in files:

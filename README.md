@@ -8,7 +8,7 @@ Two scripts for an already selected collection of candidate EET-related proteins
    Pfam/custom HMM searches -> domain prevalence, repeated-domain statistics and
    within-protein co-occurrence networks. Single-file mode does not require clustering.
 
-Keep `common.py` alongside the two scripts. No genome coordinates, earlier EET
+Keep `common.py` and `domain_reports.py` alongside the two scripts. No genome coordinates, earlier EET
 wrapper, FeGenie checkout, or web submission is required. No new EET activity
 classification is made. These scripts also work for other preselected protein sets.
 
@@ -52,7 +52,7 @@ python -m pip install -r requirements.txt
 
 The same requirements file also works in an existing clustering environment.
 `mcl`, `mcxload` and `diamond` are required only by `cluster_proteins.py`.
-Keep `common.py` next to `cluster_domains.py` when copying it elsewhere.
+Keep `common.py` and `domain_reports.py` next to `cluster_domains.py` when copying it elsewhere.
 
 PyHMMER includes the HMMER search engine, so domain profiling does not require a
 separate `hmmsearch` executable or `hmmpress`. No restricted localization software
@@ -219,17 +219,34 @@ protein, including those with no detected domains. Repeats, overlap handling,
 gathering thresholds, raw hits and within-protein co-occurrence use the same
 analysis as folder mode. No sequence clustering is performed or inferred.
 
-The `cluster` columns and `cluster_summary.tsv` filename are retained for output
-compatibility; in standalone mode their label is the FASTA filename stem
-(`eet_proteins.faa.gz` -> `eet_proteins`). Since no outside collection is supplied,
-outside-cluster prevalence and prevalence ratios are `NA`.
+Standalone mode has a collection-specific output schema and report:
 
-In addition to the shared output files below, standalone mode writes
-`cooccurrence_edges.tsv`, `domain_network.graphml` and `domain_network.svg`
-directly in the output folder. The SVG is omitted with `--no-plots`. These are
-copies of the corresponding files in `clusters/<filename_stem>/`; `index.html`
-labels the run as single-FASTA profiling. The manifest records `input_mode=proteins`
-and the collection label. Folder inputs record `input_mode=clusters`.
+- `collection_summary.tsv`: dataset name, total/annotated/unannotated protein counts,
+  domain-family and copy counts, and co-occurrence-pair count.
+- `domain_prevalence.tsv`: domain accession/name, `total_proteins`,
+  `proteins_with_domain`, `fraction_proteins`, `percent_proteins`, copy counts,
+  `mean_copies_per_protein` and `mean_copies_when_present`.
+- `cooccurrence_edges.tsv`: within-protein pairs with `fraction_proteins`, Jaccard,
+  lift and conditional probabilities.
+- `domain_hits.tsv`, `protein_architectures.tsv` and `id_mapping.tsv` contain no
+  artificial cluster column. Original protein identifiers remain intact.
+- `domain_network.graphml` uses `dataset` and `total_proteins` metadata and
+  `fraction_proteins` node/edge attributes.
+- `domain_prevalence.svg`: percentage-based chart of the 30 most prevalent domain
+  families, with protein counts. All detected families are in the searchable table.
+- `index.html`: collection-wide metric cards, domain breakdown, prevalence chart
+  and embedded within-protein network, rather than a one-row cluster index.
+
+All files are written directly at the output root: standalone mode creates no
+`clusters/` directory, no `cluster_summary.tsv`, and no outside-cluster comparison
+columns. `--no-plots` suppresses both SVGs but retains tables, GraphML and the report.
+The filename stem identifies the dataset in the summary/report; no clustering is
+performed or implied. Folder mode retains its existing per-cluster schema.
+
+The manifest records `input_mode=proteins` for single-file inputs and
+`input_mode=clusters` for folders. When switching modes with `--resume`, obsolete
+generated summaries, plots and generated subfolders are removed so the directory
+reflects the current input mode. Unrelated user-added files are not removed.
 
 Use a separate output directory that does not contain your input protein files.
 
@@ -254,10 +271,17 @@ It reads HMMs in batches; by default the digital protein sequences are held in R
 
 `--resume` reuses a checksum-matching completed HMM search; summaries/plots are
 regenerated. The key includes protein content, cluster membership/file content,
-model file, fallback threshold, PyHMMER version and search-script hashes. Changing
+model file, fallback threshold, PyHMMER version and the normalization/search-core code.
+Presentation changes do not invalidate an otherwise identical search. Changing
 cluster names/membership invalidates the mapping cache. Interrupted HMM searches
 are rerun; only **completed** scans are cached. Logs and an in-progress manifest
 remain after a failure; no successful manifest is written for an incomplete run.
+Completed searches from the published version 1.1.0 are also recognized and migrated
+when the original search key and raw/database checksums match. To regenerate native
+collection outputs from that version, update the scripts and rerun the same command
+with the same input, HMM and output directory plus `--resume`. This avoids a fresh
+Pfam scan. Modified inputs/models/search settings or a missing/corrupted cache
+require a new search; `--force` always requests one.
 
 ### What "domain propensity" means here
 
@@ -266,7 +290,7 @@ For each cluster and domain:
 - **Proteins with domain / all proteins in cluster**: prevalence (fraction and percent).
 - Total domain copies: repeated domains count individually here.
 - Mean copies per cluster member and mean copies among domain-positive members.
-- Prevalence outside the cluster and a descriptive ratio against that background.
+- For folder mode only: prevalence outside the cluster and a descriptive ratio against that background.
 
 For example, if 12 of 20 proteins carry SLH, prevalence is **60%**, even if those
 12 proteins together contain 36 SLH repeats. The copy count is 36 and copies per
@@ -277,7 +301,8 @@ protein lacks the domain or has no EET function.
 The outside-cluster ratio is descriptive, **not** a statistical enrichment test:
 sequence clustering, phylogeny and duplicated/overrepresented samples violate a
 naive independence assumption. `Inf` indicates no observed outside-cluster copies;
-`NA` means there are no proteins outside this cluster.
+`NA` means there are no proteins outside this cluster. These comparison columns
+are omitted entirely for standalone FASTA input.
 
 ### Network definition
 
@@ -316,7 +341,7 @@ python cluster_domains.py -i eet_mcl/clusters --hmm databases/Pfam-A.hmm \
   -o domain_profiles_all --overlap-policy all --no-plots --threads 32
 ```
 
-### Domain output layout
+### Cluster-folder domain output layout
 
 ```text
 eet_cluster_domains/
@@ -336,6 +361,8 @@ eet_cluster_domains/
     domain_network.svg            # scalable figure; omitted with --no-plots
   work/                           # normalized sequences, raw domtblout, SQL/cache
 ```
+
+Single-FASTA output uses the flat collection layout described above.
 
 Open `index.html` locally. Keep the folder together so its links work. Network SVGs
 are standalone vector images. To keep dense figures legible, plots show at most

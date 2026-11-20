@@ -21,18 +21,36 @@ def test_standalone_matches_folder_statistics_and_exports(tmp_path):
     single=tmp_path/'single';clustered=tmp_path/'clustered'
     assert cd.main(['--input',str(fasta),'--hmm',str(hmm),'-o',str(single),'-t','2'])==0
     assert cd.main(['--clusters',str(folder),'--hmm',str(hmm),'-o',str(clustered),'--no-plots','-t','2'])==0
-    for name in ['cluster_summary.tsv','domain_prevalence.tsv','domain_hits.tsv','protein_architectures.tsv']:
-        assert read(single/name)==read(clustered/name)
+    for name in ['domain_hits.tsv','protein_architectures.tsv']:
+        assert read(single/name)==[{k:v for k,v in row.items() if k!='cluster'} for row in read(clustered/name)]
+    folder_domains={r['accession']:r for r in read(clustered/'domain_prevalence.tsv')}
+    for r in read(single/'domain_prevalence.tsv'):
+        original=folder_domains[r['accession']]
+        assert r['fraction_proteins']==original['fraction_cluster_proteins']
+        assert r['domain_copies']==original['domain_copies']
     domains={r['accession']:r for r in read(single/'domain_prevalence.tsv')}
-    assert float(domains['TEST_A.1']['fraction_cluster_proteins'])==pytest.approx(2/3)
+    assert float(domains['TEST_A.1']['fraction_proteins'])==pytest.approx(2/3)
     assert domains['TEST_A.1']['domain_copies']=='3'
-    assert all(r['outside_prevalence']=='NA' and r['prevalence_ratio_vs_outside']=='NA' for r in domains.values())
+    assert all(not any('cluster' in k or 'outside' in k for k in r) for r in domains.values())
+    assert not (single/'cluster_summary.tsv').exists() and not (single/'clusters').exists()
+    summary=read(single/'collection_summary.tsv')[0]
+    assert summary['dataset']=='family_1' and summary['total_proteins']=='3'
+    assert summary['proteins_without_domains']=='1'
+    for name in ['domain_hits.tsv','protein_architectures.tsv','id_mapping.tsv','cooccurrence_edges.tsv']:
+        assert not any('cluster' in k for k in read(single/name)[0])
     assert read(single/'cooccurrence_edges.tsv')[0]['proteins_with_both']=='1'
     graph=nx.read_graphml(single/'domain_network.graphml')
     assert len(graph)==2 and graph.number_of_edges()==1
     assert graph.graph['input_mode']=='proteins'
     assert (single/'domain_network.svg').read_text().startswith('<?xml')
-    assert 'no sequence clustering was performed' in (single/'index.html').read_text()
+    assert graph.graph['dataset']=='family_1' and graph.graph['total_proteins']==3
+    assert not any('cluster' in k for k in graph.graph)
+    assert all(not any('cluster' in k for k in attrs) for _,attrs in graph.nodes(data=True))
+    assert all(not any('cluster' in k for k in attrs) for _,_,attrs in graph.edges(data=True))
+    report=(single/'index.html').read_text()
+    assert 'Protein collection domain profile' in report and 'TEST_A.1' in report
+    assert 'cluster' not in report.lower()
+    assert (single/'domain_prevalence.svg').exists()
     manifest=json.loads((single/'manifest.json').read_text())
     assert manifest['input_mode']=='proteins' and manifest['protein_collections']==['family_1']
     assert manifest['counts']['proteins']==3
@@ -66,12 +84,18 @@ def test_standalone_resume_cleans_old_plot_and_folder_mode_exports(tmp_path):
     assert cd.main(args+['--resume','--no-plots'])==0
     assert not (out/'domain_network.svg').exists()
     assert (out/'domain_network.graphml').exists()
+    assert not (out/'domain_prevalence.svg').exists()
     assert cd.main(['--input',str(folder),'--hmm',str(hmm),'-o',str(out),'--resume','--no-plots'])==0
     for name in ['domain_network.svg','domain_network.graphml','cooccurrence_edges.tsv']:
         assert not (out/name).exists()
     assert len(read(out/'cluster_summary.tsv'))==2
+    assert not (out/'collection_summary.tsv').exists()
+    # Switching back must remove generated cluster folders and old schemas.
+    assert cd.main(args+['--resume','--no-plots'])==0
+    assert not (out/'clusters').exists() and not (out/'cluster_summary.tsv').exists()
+    assert (out/'collection_summary.tsv').exists()
     manifest=json.loads((out/'manifest.json').read_text())
-    assert manifest['input_mode']=='clusters' and not manifest['search_definition']['cache_reused']
+    assert manifest['input_mode']=='proteins' and not manifest['search_definition']['cache_reused']
 
 
 def test_domain_negative_single_fasta(tmp_path):
@@ -79,8 +103,8 @@ def test_domain_negative_single_fasta(tmp_path):
     fasta=tmp_path/'negative.faa';fasta.write_text('>unannotated\nM'+'P'*90+'\n')
     out=tmp_path/'profile'
     assert cd.main(['--input',str(fasta),'--hmm',str(hmm),'-o',str(out)])==0
-    summary=read(out/'cluster_summary.tsv')[0]
-    assert summary['n_proteins']=='1' and summary['proteins_with_domains']=='0'
+    summary=read(out/'collection_summary.tsv')[0]
+    assert summary['total_proteins']=='1' and summary['proteins_with_domains']=='0'
     assert not read(out/'domain_prevalence.tsv')
     assert not read(out/'cooccurrence_edges.tsv')
     assert len(nx.read_graphml(out/'domain_network.graphml'))==0
@@ -104,3 +128,30 @@ def test_missing_input_and_output_containing_input_fail_safely(tmp_path):
     fasta=folder/'family_1.faa';before=fasta.read_bytes()
     assert cd.main(['--input',str(fasta),'--hmm',str(hmm),'-o',str(folder),'--force'])==2
     assert fasta.read_bytes()==before
+
+
+def test_published_cache_migration_and_report_only_resume(tmp_path,monkeypatch):
+    import pyhmmer
+    from common import dump, sha256, signature
+    folder,hmm=domain_fixture(tmp_path);fasta=folder/'family_1.faa';out=tmp_path/'profile'
+    args=['-i',str(fasta),'--hmm',str(hmm),'-o',str(out),'--no-plots']
+    assert cd.main(args)==0
+    work=out/'work';raw=work/'domains.domtblout';raw_time=raw.stat().st_mtime_ns
+    stamp=json.loads((work/'search.stage.json').read_text())
+    # Recreate the exact key layout used by the published v1.1.0 script.
+    stamp['key']=signature(dict(script='dd77ecf24746035c42de6036932c397c67eb498f3b7df6eab8eb9255770b5d3f',common='ddce5e4ebc029d185dd9e45046d13d8daa1bbd1810890bd7b638c1b40403f681',memberships=[('family_1',sha256(fasta))],proteins=sha256(work/'proteins.faa'),hmm=sha256(hmm),pyhmmer=pyhmmer.__version__,fallback=None))
+    dump(work/'search.stage.json',stamp)
+    (out/'cluster_summary.tsv').write_text('legacy output')
+    legacy=out/'clusters/family_1';legacy.mkdir(parents=True)
+    (legacy/'domain_prevalence.tsv').write_text('legacy output')
+    def cannot_search(*args,**kwargs):raise AssertionError('Presentation refresh must not rerun HMMER')
+    monkeypatch.setattr(pyhmmer.hmmer,'hmmsearch',cannot_search)
+    assert cd.main(args+['--resume'])==0
+    assert raw.stat().st_mtime_ns==raw_time
+    result=json.loads((out/'manifest.json').read_text())['search_definition']
+    assert result['cache_reused'] and result['legacy_cache_migrated']
+    assert not (out/'cluster_summary.tsv').exists() and not (out/'clusters').exists()
+    assert (out/'collection_summary.tsv').exists()
+    assert cd.main(args+['--resume'])==0
+    result=json.loads((out/'manifest.json').read_text())['search_definition']
+    assert result['cache_reused'] and not result['legacy_cache_migrated']

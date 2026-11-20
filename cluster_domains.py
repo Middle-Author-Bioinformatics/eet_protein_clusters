@@ -6,11 +6,11 @@ import csv
 import gzip
 import html
 import itertools
+import inspect
 import json
 import logging
 import math
 from pathlib import Path
-import shutil
 import sqlite3
 import sys
 from common import (LOG,normalize,sha256,signature,writer,dump,versions,
@@ -145,7 +145,23 @@ def select_domains(hits,policy='best',overlap_fraction=.5,min_coverage=0.):
     return sorted(kept,key=lambda h:(h['start'],h['end'],h['accession'])),decisions
 
 
-def draw_network(graph,path,max_nodes,max_edges,cluster,total):
+def search_cache_keys(files,combined,hmm_sha,pyhmmer_version,fallback):
+    """Presentation changes must not invalidate an otherwise identical HMM search."""
+    data=dict(memberships=[(c,sha256(p)) for c,p in files],proteins=sha256(combined),
+              hmm=hmm_sha,pyhmmer=pyhmmer_version,fallback=fallback)
+    scientific_code={f.__name__:inspect.getsource(f) for f in [normalize,model_inventory,scan]}
+    key=signature(dict(search_schema=1,scientific_code=scientific_code,**data))
+    # Exact source hashes of the published v1.1.0 implementation, whose search
+    # and normalization semantics are unchanged. Raw/cache checksums still apply.
+    legacy=signature(dict(script='dd77ecf24746035c42de6036932c397c67eb498f3b7df6eab8eb9255770b5d3f',
+                          common='ddce5e4ebc029d185dd9e45046d13d8daa1bbd1810890bd7b638c1b40403f681',**data))
+    # Do not retain migration eligibility if a future edit changes the search core.
+    if signature(scientific_code)!='8280ecc153383d41c0ab05c4ac09baaa658132d78fd45a65a7cdfd04fadcd8a5':
+        legacy=None
+    return key,legacy
+
+
+def draw_network(graph,path,max_nodes,max_edges,collection,total):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -160,11 +176,12 @@ def draw_network(graph,path,max_nodes,max_edges,cluster,total):
         ax.text(.5,.5,'No domains passed the selected thresholds',ha='center',va='center',transform=ax.transAxes)
     else:
         pos=nx.spring_layout(view,seed=17,weight='proteins_with_both') if view.number_of_edges() else nx.circular_layout(view)
-        sizes=[250+1600*view.nodes[n]['fraction_cluster_proteins'] for n in view]
+        fraction_key='fraction_proteins' if graph.graph.get('input_mode')=='proteins' else 'fraction_cluster_proteins'
+        sizes=[250+1600*view.nodes[n][fraction_key] for n in view]
         widths=[.5+4*e[2]['jaccard'] for e in view.edges(data=True)]
         nx.draw_networkx(view,pos,ax=ax,node_size=sizes,width=widths,node_color='#8ac6be',edge_color='#7b8e9a',
                          labels={n:n+'\n'+view.nodes[n]['name'] for n in view},font_size=8)
-    ax.set_title(f'{cluster}: within-protein domain co-occurrence\n{total} proteins; shown {len(view)}/{len(graph)} domains, {view.number_of_edges()}/{graph.number_of_edges()} edges',fontsize=11)
+    ax.set_title(f'{collection}: within-protein domain co-occurrence\n{total} proteins; shown {len(view)}/{len(graph)} domains, {view.number_of_edges()}/{graph.number_of_edges()} edges',fontsize=11)
     ax.axis('off');fig.tight_layout();fig.savefig(path,format='svg',bbox_inches='tight');plt.close(fig)
 
 
@@ -172,7 +189,7 @@ def summarize(db,out,args,input_mode='clusters'):
     import networkx as nx
     standalone=input_mode=='proteins'
     # Clear convenience exports when switching modes or disabling plots on resume.
-    for name in ['cooccurrence_edges.tsv','domain_network.graphml','domain_network.svg']:
+    for name in ['cooccurrence_edges.tsv','domain_network.graphml','domain_network.svg','domain_prevalence.svg','cluster_summary.tsv','collection_summary.tsv']:
         (out/name).unlink(missing_ok=True)
     if (out/'clusters').exists():
         for old in (out/'clusters').iterdir():
@@ -181,14 +198,18 @@ def summarize(db,out,args,input_mode='clusters'):
                     (old/name).unlink(missing_ok=True)
                 try:old.rmdir()
                 except OSError:pass
+        try:(out/'clusters').rmdir()
+        except OSError:pass
     clusters={c:n for c,n in db.execute('SELECT cluster,COUNT(*) FROM proteins GROUP BY cluster ORDER BY cluster')}
+    if standalone and len(clusters)!=1:raise ValueError('Single-FASTA mode requires exactly one input collection')
     total=sum(clusters.values())
     # Domain summaries and pair counts are aggregated once, then written per cluster.
     counts=defaultdict(Counter);copies=defaultdict(Counter);pairs=defaultdict(Counter)
     names={a:n for a,n in db.execute('SELECT accession,name FROM models')}
     with_domain=Counter()
-    af,aw=writer(out/'domain_hits.tsv',HIT_FIELDS+['selected','selection_reason'])
-    pf,pw=writer(out/'protein_architectures.tsv',['cluster','protein_id','n_domain_hits','n_distinct_domains','architecture','domain_set'])
+    hit_fields=[f for f in HIT_FIELDS if not standalone or f!='cluster']
+    af,aw=writer(out/'domain_hits.tsv',hit_fields+['selected','selection_reason'])
+    pf,pw=writer(out/'protein_architectures.tsv',([] if standalone else ['cluster'])+['protein_id','n_domain_hits','n_distinct_domains','architecture','domain_set'])
     db.execute('DROP TABLE IF EXISTS architectures')
     db.execute('CREATE TABLE architectures (n INTEGER PRIMARY KEY, hits INTEGER, distinct_n INTEGER, architecture TEXT, domain_set TEXT)')
     try:
@@ -209,14 +230,19 @@ def summarize(db,out,args,input_mode='clusters'):
     db.commit()
     global_counts=Counter()
     for counter in counts.values():global_counts.update(counter)
-    sf,sw=writer(out/'cluster_summary.tsv',['cluster','n_proteins','proteins_with_domains','fraction_with_domains','distinct_domains','domain_copies','cooccurrence_pairs','top_domain','top_domain_fraction'])
-    prevalence_fields=['cluster','accession','name','cluster_proteins','proteins_with_domain','fraction_cluster_proteins','percent_cluster_proteins','domain_copies','mean_copies_per_member','mean_copies_when_present','outside_cluster_proteins','outside_proteins_with_domain','outside_prevalence','prevalence_ratio_vs_outside']
+    summary_fields=['dataset','total_proteins','proteins_with_domains','proteins_without_domains','fraction_with_domains','distinct_domains','domain_copies','cooccurrence_pairs','top_domain','top_domain_fraction'] if standalone else ['cluster','n_proteins','proteins_with_domains','fraction_with_domains','distinct_domains','domain_copies','cooccurrence_pairs','top_domain','top_domain_fraction']
+    sf,sw=writer(out/('collection_summary.tsv' if standalone else 'cluster_summary.tsv'),summary_fields)
+    prevalence_fields=['accession','name','total_proteins','proteins_with_domain','fraction_proteins','percent_proteins','domain_copies','mean_copies_per_protein','mean_copies_when_present'] if standalone else ['cluster','accession','name','cluster_proteins','proteins_with_domain','fraction_cluster_proteins','percent_cluster_proteins','domain_copies','mean_copies_per_member','mean_copies_when_present','outside_cluster_proteins','outside_proteins_with_domain','outside_prevalence','prevalence_ratio_vs_outside']
+    fraction_key='fraction_proteins' if standalone else 'fraction_cluster_proteins'
     lf,lw=writer(out/'domain_prevalence.tsv',prevalence_fields)
+    collection_rows=[]
     rows_for_html=[]
     try:
         for c,n in clusters.items():
-            folder=out/'clusters'/c;folder.mkdir(parents=True,exist_ok=True)
-            graph=nx.Graph(cluster=c,cluster_proteins=n,input_mode=input_mode,definition='Domains co-occur in the same protein; repeats count once per protein for edges')
+            folder=out if standalone else out/'clusters'/c
+            folder.mkdir(parents=True,exist_ok=True)
+            graph_metadata=dict(dataset=c,total_proteins=n) if standalone else dict(cluster=c,cluster_proteins=n)
+            graph=nx.Graph(**graph_metadata,input_mode=input_mode,definition='Domains co-occur in the same protein; repeats count once per protein for edges')
             rows=[]
             for a,k in sorted(counts[c].items(),key=lambda item:(-item[1],item[0])):
                 outside_n=total-n;outside_k=global_counts[a]-k
@@ -228,32 +254,40 @@ def summarize(db,out,args,input_mode='clusters'):
                          outside_cluster_proteins=outside_n,outside_proteins_with_domain=outside_k,
                          outside_prevalence=outside_p if outside_p is not None else 'NA',
                          prevalence_ratio_vs_outside=prevalence/outside_p if outside_p else ('Inf' if outside_n else 'NA'))
-                rows.append(row);graph.add_node(a,**{key:row[key] for key in ['name','proteins_with_domain','fraction_cluster_proteins','domain_copies']})
-            df,dw=writer(folder/'domain_prevalence.tsv',prevalence_fields);dw.writerows(rows);df.close();lw.writerows(rows)
-            edge_fields=['domain_a','domain_b','proteins_with_both','fraction_cluster_proteins','jaccard','lift','p_b_given_a','p_a_given_b']
+                if standalone:
+                    row=dict(accession=a,name=names[a],total_proteins=n,proteins_with_domain=k,fraction_proteins=prevalence,percent_proteins=100*prevalence,domain_copies=copies[c][a],mean_copies_per_protein=copies[c][a]/n,mean_copies_when_present=copies[c][a]/k)
+                rows.append(row);graph.add_node(a,**{key:row[key] for key in ['name','proteins_with_domain',fraction_key,'domain_copies']})
+            if not standalone:
+                df,dw=writer(folder/'domain_prevalence.tsv',prevalence_fields);dw.writerows(rows);df.close()
+            lw.writerows(rows)
+            if standalone:collection_rows=rows
+            edge_fields=['domain_a','domain_b','proteins_with_both',fraction_key,'jaccard','lift','p_b_given_a','p_a_given_b']
             ef,ew=writer(folder/'cooccurrence_edges.tsv',edge_fields)
             for (a,b),k in sorted(pairs[c].items()):
                 na,nb=counts[c][a],counts[c][b]
                 row=dict(domain_a=a,domain_b=b,proteins_with_both=k,fraction_cluster_proteins=k/n,jaccard=k/(na+nb-k),
                          lift=k*n/(na*nb),p_b_given_a=k/na,p_a_given_b=k/nb)
+                if standalone:row['fraction_proteins']=row.pop('fraction_cluster_proteins')
                 ew.writerow(row)
                 if k>=args.min_pair_count:graph.add_edge(a,b,**{key:val for key,val in row.items() if key not in ['domain_a','domain_b']})
             ef.close()
             nx.write_graphml(graph,folder/'domain_network.graphml')
             if not args.no_plots:draw_network(graph,folder/'domain_network.svg',args.max_plot_nodes,args.max_plot_edges,c,n)
-            if standalone:
-                for name in ['cooccurrence_edges.tsv','domain_network.graphml']+([] if args.no_plots else ['domain_network.svg']):
-                    shutil.copyfile(folder/name,out/name)
             top=max(counts[c],key=lambda a:counts[c][a]) if counts[c] else ''
             summary=dict(cluster=c,n_proteins=n,proteins_with_domains=with_domain[c],fraction_with_domains=with_domain[c]/n,
                          distinct_domains=len(counts[c]),domain_copies=sum(copies[c].values()),cooccurrence_pairs=len(pairs[c]),
                          top_domain=top,top_domain_fraction=counts[c][top]/n if top else 0.)
+            if standalone:
+                summary.pop('cluster');summary.pop('n_proteins')
+                summary.update(dataset=c,total_proteins=n,proteins_without_domains=n-with_domain[c])
             sw.writerow(summary);rows_for_html.append(summary)
     finally:sf.close();lf.close()
-    text='''<!doctype html><html lang="en"><meta charset="utf-8"><title>Protein cluster domain profiles</title><style>body{font:15px system-ui;margin:30px;color:#244}td,th{padding:8px;border:1px solid #ccd}table{border-collapse:collapse}input{padding:10px;margin:10px}a{color:#08796c}</style><h1>Protein cluster domain profiles</h1><p>Prevalence uses all cluster proteins, including proteins with no detected domains. Edges mean domains in the same protein; repeats do not multiply edges. These are descriptive associations, not evidence of physical interaction, operons or EET activity.</p><input id="q" placeholder="Search clusters"><table><thead><tr>'''
     if standalone:
-        text=text.replace('Protein cluster domain profiles','Protein domain profile').replace('all cluster proteins','all input proteins').replace('Search clusters','Search collection')
-        text=text.replace('<table>', '<p>Single-FASTA input: all proteins form one collection; no sequence clustering was performed. The cluster column stores the input filename stem. Outside-cluster comparisons are unavailable.</p><table>',1)
+        from domain_reports import draw_prevalence,render_collection_report
+        if not args.no_plots:draw_prevalence(collection_rows,out/'domain_prevalence.svg')
+        render_collection_report(out,rows_for_html[0],collection_rows)
+        return dict(proteins=total,proteins_with_domains=sum(with_domain.values()),proteins_without_domains=total-sum(with_domain.values()),distinct_domains=len(global_counts))
+    text='''<!doctype html><html lang="en"><meta charset="utf-8"><title>Protein cluster domain profiles</title><style>body{font:15px system-ui;margin:30px;color:#244}td,th{padding:8px;border:1px solid #ccd}table{border-collapse:collapse}input{padding:10px;margin:10px}a{color:#08796c}</style><h1>Protein cluster domain profiles</h1><p>Prevalence uses all cluster proteins, including proteins with no detected domains. Edges mean domains in the same protein; repeats do not multiply edges. These are descriptive associations, not evidence of physical interaction, operons or EET activity.</p><input id="q" placeholder="Search clusters"><table><thead><tr>'''
     fields=list(rows_for_html[0]) if rows_for_html else []
     text+=''.join('<th>'+html.escape(k)+'</th>' for k in fields)+'<th>Files</th></tr></thead><tbody>'
     from urllib.parse import quote
@@ -285,15 +319,20 @@ def run(args):
         work=args.output/'work';work.mkdir(exist_ok=True)
         combined=work/'proteins.faa';index=work/'proteins.sqlite'
         # Keep the domain DB separate: normalized mapping can be regenerated safely.
-        db,total=normalize(files,combined,index,args.output/'id_mapping.tsv')
+        db,total=normalize(files,combined,index,args.output/'id_mapping.tsv',include_cluster=input_mode=='clusters')
         search_db=work/'search.sqlite';raw=work/'domains.domtblout';stamp=work/'search.stage.json'
-        key=signature(dict(script=sha256(Path(__file__)),common=sha256(Path(__file__).with_name('common.py')),memberships=[(c,sha256(p)) for c,p in files],proteins=sha256(combined),hmm=manifest['hmm_sha256'],pyhmmer=pyhmmer.__version__,fallback=args.domain_evalue))
+        key,legacy_key=search_cache_keys(files,combined,manifest['hmm_sha256'],pyhmmer.__version__,args.domain_evalue)
         reuse=stage_reusable(stamp,key,[search_db,raw],args.resume and not args.force)
+        legacy_reuse=not reuse and stage_reusable(stamp,legacy_key,[search_db,raw],args.resume and not args.force)
+        reuse=reuse or legacy_reuse
         if reuse:
             LOG.info('Reusing completed HMM search')
             source=sqlite3.connect(search_db)
             source.backup(db)  # Restore mapping plus HMM results; verify membership below.
             source.close()
+            if legacy_reuse:
+                LOG.info('Migrating compatible v1.1.0 search cache; no HMM rescan needed')
+                mark_stage(stamp,key,[search_db,raw])
             # Cluster labels/headers may have changed without changing normalized sequence bytes.
             # Such changes are part of the input signature and invalidate this cache.
         else:
@@ -306,7 +345,8 @@ def run(args):
         # Persist the search definition even on reuse.
         manifest['search_definition']=dict(algorithm='PyHMMER hmmsearch on input proteins' if input_mode=='proteins' else 'PyHMMER hmmsearch on combined cluster proteins',
                                           ga_preferred=True,fallback_evalue=args.domain_evalue,total_proteins=total,
-                                          models=db.execute('SELECT COUNT(*) FROM models').fetchone()[0],cache_reused=reuse)
+                                          models=db.execute('SELECT COUNT(*) FROM models').fetchone()[0],cache_reused=reuse,
+                                          legacy_cache_migrated=legacy_reuse)
         mf,mw=writer(args.output/'model_inventory.tsv',['accession','name','model_length','threshold','mode'])
         for row in db.execute('SELECT * FROM models ORDER BY accession'):mw.writerow(dict(zip(['accession','name','model_length','threshold','mode'],row)))
         mf.close()
