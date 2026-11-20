@@ -1,0 +1,74 @@
+# Validation
+
+Validated on Linux with Python 3.12, BioPython 1.88, PyHMMER 0.12.3,
+NetworkX 3.7, Matplotlib 3.10.8 and pytest 9.2.0.
+
+**15 tests passed**, including execution of the actual external programs:
+
+- DIAMOND **2.2.8**, official Linux release executable.
+- MCL and mcxload **22-282**, Debian distribution build with its libtingea dependency.
+- PyHMMER's actual HMMER search engine, including sequence and domain GA thresholds.
+
+No mock executable replaced DIAMOND, MCL, mcxload, or the HMM engine in those tests.
+The Conda installation command/environment solve was not run in this execution
+environment; the tested binaries were provisioned independently for verification.
+
+Run the suite from the unzipped package:
+
+```bash
+python -m pip install pytest
+python -m pytest tests -q
+```
+
+External DIAMOND/MCL tests skip explicitly if those executables are absent from
+PATH. Domain tests require the dependencies in requirements.txt. The suite itself
+does not download databases or binaries.
+
+## Tested behavior
+
+- Protein IDs normalized safely and original headers retained; duplicate original
+  IDs rejected; original IDs that resemble internal IDs mapped without ambiguity.
+- Similarity identity, E-value and **both-protein coverage** filters; invalid
+  numerical fields/coordinates and unknown IDs rejected.
+- Reciprocal and repeated alignment edges deduplicated using maximum weight;
+  zero E-values capped rather than becoming infinite weights.
+- MCL output verified as a partition; duplicate members and missing non-isolated
+  vertices rejected. Isolates and entirely edgeless inputs retained as singletons.
+- Real DIAMOND -> mcxload -> MCL execution on synthetic families: two two-member
+  families plus one unrelated singleton. Every input protein appeared once.
+- DIAMOND cache reuse across a changed MCL inflation setting.
+- Repeated domains retained as copies while counting domain presence once per
+  protein for prevalence and pair statistics.
+- Default overlapping-model suppression, optional retention of all overlaps,
+  and minimum model-coverage filtering.
+- Real HMM searches against two synthetic HMMs/controlled protein architectures:
+  A-A-B, A-only, B-only and domain-negative proteins.
+- Denominators include domain-negative proteins. For a three-member cluster,
+  A prevalence was 2/3 with three copies and 1.5 copies per positive protein;
+  A-B occurred in one protein with Jaccard 0.5 and lift 1.5.
+- Domains found in different proteins in the same cluster do **not** create a
+  within-protein co-occurrence edge.
+- Domain-negative clusters generate zero-domain summaries and empty-network plots.
+- Missing-GA models produce an error unless an explicit E-value fallback is supplied.
+- Low-memory target streaming, one-model batching, GraphML, SVG, no-plot mode,
+  minimum edge counts, architecture tables and zero-hit output were exercised.
+- Cached domain searches reused for identical inputs; cluster-name/membership changes
+  invalidate the cached mapping and stale generated summaries are removed.
+
+## Scope and limitations
+
+The HMM tests used controlled models generated from synthetic amino-acid sequences,
+not an experimental EET validation panel. A full Pfam-A scan was **not** run during
+validation, and no user protein collection was supplied. Search/database coverage
+and sensitivity in the user's biological data therefore remain unmeasured.
+
+No macOS installation, million-protein workload, real-cohort MCL parameter sweep,
+or interactive browser-rendering benchmark was performed. GraphML was read back
+with NetworkX, SVG files were generated, and TSV values were asserted. Dense
+plots are deliberately limited; complete data remain in the TSVs/GraphML.
+
+Pfam overlap handling is a documented greedy heuristic rather than the curated
+PfamScan clan/nested-domain algorithm. Prevalence and network statistics are
+observational, not physical interactions or EET activity calls. Real data should
+be inspected for partial proteins, sequence redundancy, taxon imbalance, domain
+model coverage and clustering sensitivity before biological interpretation.
