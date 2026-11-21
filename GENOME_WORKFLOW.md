@@ -10,7 +10,7 @@ default**. No protein is excluded because it lacks a motif or domain.
 ```bash
 git clone https://github.com/Middle-Author-Bioinformatics/eet_protein_clusters.git
 cd eet_protein_clusters
-git switch codex/signalp4-phobius  # until this PR is merged
+git switch codex/diamond-scratch-directory  # until this PR is merged
 conda env create -f environment.yml
 conda activate eet-clusters
 ```
@@ -19,7 +19,7 @@ For an existing clone, fetch and switch to the PR branch instead:
 
 ```bash
 git fetch origin
-git switch codex/signalp4-phobius
+git switch codex/diamond-scratch-directory
 conda activate eet-clusters
 ```
 
@@ -283,7 +283,14 @@ genome can renumber later IDs and correctly invalidate downstream caches.
 
 MCL inflation must be **greater than 1**; a coarse value such as 1.2/1.4 can be
 explored. Identity/coverage thresholds also change clusters. All-versus-all whole
-proteome matching can be expensive. `--block-size` tunes DIAMOND memory;
+proteome matching can be expensive. `--tmpdir /path/to/large/scratch` is forwarded
+to DIAMOND; its default is `$TMPDIR` or `clustering/work`. Put `--output` on a
+large filesystem too, because alignments/graphs remain there. The wrapper owns and
+cleans only an isolated scratch subdirectory. A failed DIAMOND pass restarts with
+`--resume`; changing scratch alone preserves a completed search.
+`--block-size 0.4` reduces DIAMOND scratch/memory usage relative to the retained
+2.0 default, but can slightly change alignments. See the
+[storage troubleshooting instructions](README.md#temporary-storage-and-disk-full-errors).
 `--low-memory` streams HMM targets; `--no-plots` avoids SVG rendering for many
 clusters. Full Pfam searches and thousands of per-cluster networks can take substantial
 time/disk space. No million-protein performance claim is made.

@@ -126,8 +126,56 @@ requires separate validation.
 - The graph edge-deduplication table is on disk in SQLite; sequences are accessed
   by file offsets when cluster FASTAs are written. MCL still needs RAM for its sparse
   graph, and all-versus-all searches can create very large temporary/alignment files.
-- `--block-size 1` reduces DIAMOND's memory use. It does not put a hard total-memory
+- `--block-size 0.4` reduces DIAMOND's memory and temporary disk use. It does not put a hard total-memory
   limit on DIAMOND, MCL, or the operating system. Threads are configurable.
+
+### Temporary storage and disk-full errors
+
+DIAMOND scratch can be much larger than the protein FASTA. Check the actual
+filesystem holding `OUTPUT/work`, not only the overall `df -h` listing:
+
+```bash
+df -h MCL2/work /home/ark
+df -i MCL2/work /home/ark
+```
+
+Free bytes, free inodes and user quotas can each limit writes. On TheBelly the
+reported root partition had only 8.5 GB free while `/home/ark` had 1.8 TB. This does
+not prove that the failed output was on root: shell `~`, symlinks and mounts need
+the directory-specific check above. DIAMOND may also consume substantial scratch
+before it cleans up a failed run, so free space reported after failure is not its
+peak usage.
+
+Both scripts now accept `--tmpdir DIRECTORY` (alias `--diamond-tmpdir`). The scratch
+parent defaults to `$TMPDIR` when set, otherwise `OUTPUT/work`. A unique owned
+subdirectory is passed to DIAMOND explicitly and removed on success or ordinary
+failure; unrelated files/jobs are untouched. Abrupt termination/power loss can
+still leave scratch behind. Final alignments, SQLite tables, graphs and clusters
+remain under `--output`, so put **both** paths on a filesystem with sufficient space:
+
+```bash
+mkdir -p /home/ark/eet_runs /home/ark/eet_scratch
+python /home/ark/MAB/bin/eet_protein_clusters/cluster_proteins.py \
+  --input AllMHCGenes.faa \
+  --output /home/ark/eet_runs/MCL2 \
+  --tmpdir /home/ark/eet_scratch \
+  --threads 32 --inflation 2.0 --block-size 0.4 --resume
+```
+
+`--tmpdir` requires this updated version. With an earlier version, omit that flag;
+DIAMOND will use the new absolute output's `work` folder. A failed DIAMOND pass
+restarts; `--resume` reuses **completed, checksum-verified** searches, not partial
+alignments. Changing only the scratch directory preserves a completed search.
+Failed reruns invalidate the old completion stamp before overwriting hit files.
+Only this run's newly created scratch directory is cleaned, never old user files.
+
+The wrapper keeps its established block-size default 2.0 for compatibility.
+DIAMOND's upstream default for very-sensitive/ultra-sensitive mode is 0.4; lowering
+it reduces temporary space/memory but can slightly change alignment results, and
+therefore invalidates the search cache. The scratch location itself does not change
+search parameters. Disk-free snapshots and the scratch path are logged and recorded
+in the manifest; no fixed free-space value guarantees that a large all-versus-all
+search will fit. See the [official DIAMOND resource options](https://github.com/bbuchfink/diamond/wiki/3.-Command-line-options#memory--performance-options).
 
 ### Clustering outputs
 
