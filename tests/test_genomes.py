@@ -174,7 +174,7 @@ def test_real_genome_to_domains_motifs_localization_wrapper(tmp_path):
     (imports/'one.phobius.txt').write_text('SEQENCE ID TM SP PREDICTION\noriginal 0 Y n4-15c20/21o\nother 0 0 o\nnegative 0 0 o\n')
     config=tmp_path/'config.json';config.write_text(json.dumps(predictor_stub(tmp_path)))
     out=tmp_path/'analysis'
-    argv=['-i',str(inp),'-o',str(out),'--hmm',str(hmm),'--genome-metadata',str(meta),'-t','1','--no-plots','--localization-config',str(config),'--localization-import',str(imports),'--signalp','auto','--phobius','auto','--psortb','run']
+    argv=['-i',str(inp),'-o',str(out),'--hmm',str(hmm),'--genome-metadata',str(meta),'-t','1','--no-plots','--localization-config',str(config),'--localization-import',str(imports),'--signalp','auto','--phobius','auto','--psortb','run','--tmpdir',str(tmp_path/'scratch')]
     assert gp.main(argv)==0
     rows=read(out/'protein_annotations.tsv'); assert len(rows)==4
     first=rows[0]; assert first['original_id']=='original' and first['cxxch_count']=='2' and first['hematite_count']=='1'
@@ -189,6 +189,7 @@ def test_real_genome_to_domains_motifs_localization_wrapper(tmp_path):
     manifest=json.loads((out/'manifest.json').read_text());assert manifest['counts']['proteins']==4 and manifest['motif_sources']['FeGenie']['commit']
     assert any(s['tool']=='lipop' for s in manifest['skipped_analyses'])
     assert manifest['localization'][0]['argv'][1].endswith('fixture_predictor.py')
+    assert manifest['stages']['cluster_proteins.py']['provenance']['parameters']['tmpdir']==str(tmp_path/'scratch')
     raw=out/'domains/work/domains.domtblout';before=raw.stat().st_mtime_ns
     assert gp.main(argv+['--resume'])==0
     manifest=json.loads((out/'manifest.json').read_text()); assert manifest['stages']['gene_extraction']['cache_reused']

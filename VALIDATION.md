@@ -212,3 +212,23 @@ Conda dispatch uses a labeled test double. PSORTb and LipoP are now explicitly
 skipped by default and were not run. The earlier version 1.3.0 limitations above
 are historical; actual Phobius execution was added in this update. Full Pfam-A
 and biological accuracy/scale benchmarks remain unperformed.
+
+## DIAMOND scratch storage update (version 1.3.2)
+
+**53 tests passed locally**, including real DIAMOND 2.2.8 and MCL 22-282. Eight
+new storage tests cover explicit scratch paths (including spaces), `$TMPDIR`
+fallback, output/work fallback, precedence, cleanup of owned scratch while leaving
+unrelated files intact, injected disk-full failure, invalidation of an earlier
+completion stamp, restart after failure, reuse of completed searches when only
+scratch changes, invalid scratch paths and preservation of actionable errors when
+an exhausted output filesystem also prevents writing the failure manifest.
+
+The real DIAMOND test passes `--tmpdir` beneath a custom parent and uses block size
+0.4. The genome integration test verifies forwarding the scratch option to the
+clustering subprocess. Partial alignments are never treated as a completed cache.
+No physical disk was filled during testing; disk-full conditions were injected.
+The user's large `AllMHCGenes.faa` dataset and TheBelly filesystems are not
+accessible here, so this does not establish peak disk requirements or prove which
+mount, quota or inode limit caused that specific run to fail. The established
+block-size default 2.0 is retained; the documented recovery command explicitly
+selects 0.4 and notes the potential for slightly different alignments.
