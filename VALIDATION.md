@@ -130,3 +130,56 @@ PfamScan clan/nested-domain algorithm. Prevalence and network statistics are
 observational, not physical interactions or EET activity calls. Real data should
 be inspected for partial proteins, sequence redundancy, taxon imbalance, domain
 model coverage and clustering sensitivity before biological interpretation.
+
+## Genome workflow (version 1.3.0)
+
+The genome wrapper was validated with **36 passing tests** under Python 3.12,
+BioPython 1.88, Pyrodigal 3.7.1, PyHMMER 0.12.3, DIAMOND 2.2.8 and MCL 22-282.
+The external-engine tests were run, not skipped. CI now installs DIAMOND/MCL and
+Pyrodigal and runs the suite on Python 3.11 and 3.12.
+
+New checks cover:
+
+- Exact FeGenie motif regexes, independent variant totals, canonical CXXCH vs
+  MHCscan CXXCH+CXXXCH counts, negative sequences, source-compatible non-overlap
+  semantics and 1-based match coordinates.
+- Real deterministic Pyrodigal predictions from synthetic bacterial coding
+  sequences, restricted translation-table models and reproducible extraction.
+- GenBank supplied/derived translations, alternative initiator translation,
+  reverse strands, compound/fuzzy locations, exclusion of pseudogenes, stable safe
+  IDs and original IDs repeated across genomes or at different annotated loci.
+- Protein-only folder inputs preserve IDs and explicitly lack genomic coordinates.
+- Explicit Gram metadata, ambiguous input rejection, correct PSORTb `-p`/`-n`
+  selection and SignalP organism/mode/thread arguments.
+- Native PSORTb long/terse, SignalP 6, Phobius short and LipoP short parsing;
+  duplicate/unknown/ambiguous ID rejection; partial imports retain missing calls
+  as unavailable; requested missing executables give actionable errors.
+- Unknown PSORTb calls gain only feature-supported interpretations. SP-only
+  results do not imply extracellular exposure. Confident baseline calls are kept
+  when supplementary predictions disagree; disagreements are flagged.
+- Predictor command execution, native output validation, checksum caches,
+  corrupted-output invalidation, import precedence, and configuration validation.
+- A whole-genome **GenBank-to-clustering-to-domain-to-annotation** integration test
+  runs actual DIAMOND/MCL/PyHMMER against synthetic A-A-B/domain-negative proteins.
+  It verifies repeated domains, all-protein retention, known motif counts, mixed
+  Gram classes, partial localization imports, joined mappings and reports.
+  A labeled executable test double emits PSORTb-format Unknown calls to test
+  orchestration; it does not run PSORTb models. Resume reuses unchanged HMM and
+  localization outputs, while changing a genome invalidates dependent caches.
+
+A separate documented CLI demonstration generated two artificial assemblies,
+called genes with real Pyrodigal, ran DIAMOND/MCL and the synthetic HMM search,
+and produced **24 proteins in 2 clusters**, 6 proteins with >=2 canonical CXXCH
+motifs and 6 proteins with the FeGenie hematite pattern. Localization was explicitly
+skipped and all 24 proteins were reported as unassessed. This demonstration is
+reproducible with `examples/make_genome_demo.py` and the commands in
+[GENOME_WORKFLOW.md](GENOME_WORKFLOW.md). The artificial HMMs are not Pfam models
+or evidence of EET.
+
+**Not run:** real PSORTb, SignalP 6, Phobius or LipoP model inference; a full Pfam-A
+scan; an experimental localization or EET benchmark; a million-protein workload;
+or the optional provider containers. Predictor format fixtures and test doubles
+validate adapters and rules, not their biological accuracy or the local installation
+of licensed tools. No user genomes were provided. SignalP/Phobius/LipoP and their
+weights are not redistributed. Supplementary refinements are transparent feature
+annotations, not a validated replacement for PSORTb.

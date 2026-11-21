@@ -11,6 +11,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install -r requirements.txt pytest
+      - run: sudo apt-get update && sudo apt-get install -y mcl diamond-aligner
+      - run: python -m pip install -r requirements-genomes.txt pytest
       - run: python -m pytest -q
       - run: python cluster_domains.py --help
+      - run: python genome_pipeline.py --help
