@@ -1,6 +1,6 @@
 # Protein clustering and cluster-specific domain profiles
 
-Two scripts for an already selected collection of candidate EET-related proteins:
+Standalone analyses for an already selected collection of candidate EET-related proteins:
 
 1. **cluster_proteins.py**: protein FASTA -> DIAMOND all-versus-all similarity ->
    MCL clustering -> one FASTA per cluster, including singletons.
@@ -8,7 +8,12 @@ Two scripts for an already selected collection of candidate EET-related proteins
    Pfam/custom HMM searches -> domain prevalence, repeated-domain statistics and
    within-protein co-occurrence networks. Single-file mode does not require clustering.
 
-Keep `common.py` and `domain_reports.py` alongside the two scripts. No genome coordinates, earlier EET
+**Genome-folder workflow:** [GENOME_WORKFLOW.md](GENOME_WORKFLOW.md) documents
+`genome_pipeline.py`: gene extraction -> clustering -> domains -> PSORTb baseline,
+optional SignalP/Phobius/LipoP evidence, and per-protein FeGenie/MHCscan motif counts.
+It retains complete proteomes and uses explicit Gram metadata.
+
+Keep `common.py` and `domain_reports.py` alongside the two standalone scripts. No genome coordinates, earlier EET
 wrapper, FeGenie checkout, or web submission is required. No new EET activity
 classification is made. These scripts also work for other preselected protein sets.
 
