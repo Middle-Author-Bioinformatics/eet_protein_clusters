@@ -1,8 +1,38 @@
 # Validation
 
+## Native collection output (version 1.2.0)
+
+The current suite reports **21 passed, 2 skipped** on the same Linux/Python 3.12
+analysis stack. The existing DIAMOND/MCL executable tests remain skipped in this
+session. Existing folder-mode domain tests still pass.
+
+The single-FASTA tests now assert a genuinely collection-wide schema: no public
+cluster/outside-comparison columns, no generated cluster folder or cluster-summary
+file, collection-specific GraphML metadata, a prevalence chart and a domain-level
+HTML table. Raw hit/statistic values are compared to equivalent folder analysis
+using the appropriate mode-specific columns; repeat counts and negative-protein
+denominators agree. Native-to-folder and folder-to-native resume transitions remove
+stale output formats. No-plots mode removes both SVGs.
+
+An additional cache test proves that a matching published v1.1.0 cache migrates to
+the new output without invoking HMMER. An independent smoke test also executed the
+actual published v1.1.0 scripts from git, then resumed using v1.2.0 and verified the
+raw domtblout file was unchanged. Reuse validates input/model/search settings and
+raw/database checksums. Migration is disabled if the search-core implementation
+changes; presentation-only edits do not invalidate new-format search caches.
+
+The four supplied aggregate result files were also reformatted for visual review:
+4,984 input proteins, 142 detected domain families, 7,292 domain copies and 156
+observed domain pairs. Numerical prevalence and edge statistics were preserved;
+GraphML was read back and the prevalence chart was inspected as a raster preview.
+No HMM searches were rerun for that reconstruction. Overall numbers of annotated
+and unannotated proteins and per-protein architectures cannot be recovered from
+aggregate domain/pair counts; those values are explicitly unavailable in the preview.
+A real script run has the protein-level information and reports those counts.
+
 ## Standalone FASTA extension (version 1.1.0)
 
-The current suite reports **20 passed, 2 skipped** on Linux/Python 3.12 with
+At version 1.1.0, the suite reported **20 passed, 2 skipped** on Linux/Python 3.12 with
 BioPython 1.88, PyHMMER 0.12.3, NetworkX 3.7 and Matplotlib 3.10.8.
 The two existing external DIAMOND/MCL tests skipped because those executables
 were unavailable in this session; no clustering implementation was changed.
