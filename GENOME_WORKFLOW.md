@@ -1,73 +1,93 @@
 # Whole-proteome genome workflow
 
-`genome_pipeline.py` runs **all proteins** through gene extraction, DIAMOND
-all-versus-all similarity, MCL, the existing per-cluster domain analysis, and
-localization. It adds FeGenie-compatible heme/hematite motif counts for every
-protein, including domain-negative and motif-negative proteins. It does not
-select proteins by motif before clustering or label them confirmed EET proteins.
+`genome_pipeline.py` runs all proteins through gene extraction, DIAMOND/MCL
+clustering, the existing domain analysis, **SignalP 4 and Phobius**, and per-protein
+FeGenie/MHCscan heme and hematite motif counting. PSORTb and LipoP are **skipped by
+default**. No protein is excluded because it lacks a motif or domain.
 
-This wrapper belongs in `eet_protein_clusters` because it orchestrates the two
-existing clustering/domain scripts and preserves their outputs. It does not
-vendor either FeGenie or MHCscan or require their installation. Their specific
-motif definitions and output organization informed the independent motif module.
-
-## Install
+## Install and use the existing TheBelly predictors
 
 ```bash
 git clone https://github.com/Middle-Author-Bioinformatics/eet_protein_clusters.git
 cd eet_protein_clusters
-git switch codex/genome-proteome-workflow   # PR branch until merged
+git switch codex/signalp4-phobius  # until this PR is merged
 conda env create -f environment.yml
 conda activate eet-clusters
-python genome_pipeline.py --help
 ```
 
-The environment includes DIAMOND, MCL/mcxload, PyHMMER, Pyrodigal, BioPython,
-NetworkX and Matplotlib. Existing environments can instead use
-`python -m pip install -r requirements-genomes.txt`, with DIAMOND, MCL and
-mcxload separately installed and on PATH. Standalone domain-only users can
-continue installing just `requirements.txt`.
-
-PSORTb and the supplementary predictors have separate installations. Keep the
-wrapper modules together in the repository; copying only `genome_pipeline.py` is
-not sufficient. The wrapper
-never downloads them or their weights, accepts licenses, or uploads sequences.
-Only bacterial positive/negative envelope models are supported here. For unusual
-envelopes, select the appropriate PSORTb model externally and import results;
-Gram staining alone can be misleading.
-
-| Tool | Contribution and installation | License/access considerations |
-|---|---|---|
-| PSORTb 3.0 | Primary whole-proteome localization. Install standalone `psort` following https://psort.org/downloads/INSTALL.html; its official download page also recommends containers: https://psort.org/downloads/. Run `psort --version` before the workflow. On Debian/Ubuntu with the package available, `sudo apt-get update` followed by `sudo apt-get install psortb` supplies `psort`. | Standalone GNU GPL; required dependencies/models must also be installed. Official instructions list Perl/BioPerl, IO::String, BLAST and PFTOOLS. This wrapper requires a working installation, not merely a script copied into PATH. |
-| SignalP 6.0 | Supplementary Sec/Tat/pilin and lipoprotein SP classes. Obtain a license/package/models from https://services.healthtech.dtu.dk/services/SignalP-6.0/. Follow the authors' installation instructions: https://github.com/fteufel/signalp-6.0/blob/main/installation_instructions.md. Install in a **separate** environment as needed; the published package instructions support Python up to 3.10. Expose `signalp6` through an executable launcher or config. | Academic download is restricted to eligible use; commercial users need the applicable DTU license. No package or weights redistributed here. |
-| Phobius 1.01 | Specialized joint transmembrane topology/SP prediction; `phobius.pl -short`. Obtain a licensed local installation at https://phobius.sbc.su.se/download. | Academic/nonprofit restrictions; other users must contact the provider. No automatic installation. |
-| LipoP 1.0 | Optional independent lipoprotein evidence; native short output import or a configured local command. See https://services.healthtech.dtu.dk/services/LipoP-1.0/. | Subject to DTU download/license terms. The provider calls it outdated and recommends current SignalP for lipoprotein signals. It is trained on Gram-negative proteins; Gram-positive performance has been reported, but treat its provenance separately. It is not required. |
-
-SignalP 6 `LIPO`/`TATLIPO` provides lipoprotein evidence without requiring LipoP.
-Phobius supplies full-sequence topology, rather than equating an N-terminal
-hydrophobic SP with a retained membrane helix. Other predictors can be run outside
-the workflow; do not relabel their output as one of these supported native formats.
-A future adapter should preserve their source and class definitions.
-
-For example, a SignalP launcher pointing to a separately installed, licensed
-Python 3.10 environment can be an executable file named `signalp6` on PATH:
+For an existing clone, fetch and switch to the PR branch instead:
 
 ```bash
-#!/usr/bin/env bash
-exec /absolute/path/to/signalp-env/bin/signalp6 "$@"
+git fetch origin
+git switch codex/signalp4-phobius
+conda activate eet-clusters
 ```
 
-Configure installation/model details below; there is no requirement to install
-SignalP into the clustering Python environment. For the official PSORTb container, use the provider
-[command-line wrapper](https://github.com/brinkmanlab/psortb_commandline_docker)
-to generate native long results, then use the import route below. That wrapper
-has a different CLI (`-i`, `-r`) from standalone `psort`; do not rename it to
-`psort` and assume the default command applies. The provider recommends its
-pre-built image because an old build dependency URL no longer works.
+Keep the repository's Python modules together. The environment supplies DIAMOND,
+MCL/mcxload, Pyrodigal, PyHMMER, BioPython, NetworkX and Matplotlib. Alternatively
+install `requirements-genomes.txt` with pip and install DIAMOND/MCL separately.
 
-PSORTb itself is serial per
-genome; `--threads` is passed to DIAMOND, MCL, PyHMMER and SignalP. Genomes are
-processed in a deterministic order, one at a time for gene/localization steps.
+Your `signalp -h` output is the SignalP **4** interface. The wrapper can use its
+existing environment without activating it or installing SignalP into eet-clusters:
+
+```bash
+conda run --no-capture-output -n signalP signalp -V
+```
+
+`--signalp4-env signalP` resolves the environment prefix and uses `conda run` for
+both the version probe and prediction. Environment names are case-sensitive. A full
+prefix such as `/home/ark/miniconda3/envs/signalP` is also accepted. If `conda` is not
+on PATH, add `--conda-executable /home/ark/miniconda3/bin/conda`.
+
+MHCscan's [Phobius implementation](https://github.com/Middle-Author-Bioinformatics/MHCscan/tree/main/bin)
+uses `phobius.pl -short`. Its script resolves these files beside itself:
+`decodeanhmm.64bit`, `phobius.model`, and `phobius.options`. Point `--phobius-dir` at
+the **complete** existing bin folder. The GitHub decoder's executable bit may need
+restoring after cloning:
+
+```bash
+chmod +x /home/ark/MAB/bin/MHCScan/bin/decodeanhmm.64bit
+```
+
+The wrapper invokes Perl directly, checks the bundle, hashes the script/decoder/
+model/options, and supplies sequences through stdin. This handles input FASTA
+paths containing spaces despite the legacy script's internal shell command.
+The installation directory itself must have no spaces or shell metacharacters.
+Version banners and warnings go to separate stderr logs, never the prediction TSV.
+It does not modify or redistribute the MHCscan predictor bundle.
+
+After preparing a domain database, run:
+
+```bash
+python genome_pipeline.py \
+  --input /absolute/path/to/genomes --input-type assembly \
+  --output /absolute/path/to/genome_analysis \
+  --hmm /absolute/path/to/Pfam-A.hmm \
+  --gram positive --threads 32 \
+  --signalp4-env signalP --signalp run \
+  --phobius-dir /home/ark/MAB/bin/MHCScan/bin --phobius run \
+  --resume
+```
+
+PSORTb and LipoP require no installation and do not run in this command. Use
+`--gram negative` for uniformly Gram-negative inputs. For mixed collections,
+replace `--gram` with `--genome-metadata genomes.tsv`:
+
+```tsv
+genome	gram
+isolate_1	positive
+isolate_2	negative
+```
+
+`genome` is the input filename stem, removing `.gz` and the final extension.
+The Gram group is never guessed. SignalP 4 receives `-t gram+` or `-t gram-` per
+genome, with `-f short -s best -c 70` (the predictor's default network/truncation
+settings made explicit). Do not change the networks to `notm` for a whole proteome.
+
+`--signalp auto` / `--phobius auto` run when installed/configured, otherwise mark
+results unavailable. The explicit `run` flags above require the requested tools.
+A selected predictor that fails produces an actionable error. `--signalp skip`
+and `--phobius skip` allow clustering/domains/motifs to finish without those tools.
 
 ## Domain database
 
@@ -96,56 +116,6 @@ Repeated domains are retained and domain prevalence counts distinct proteins.
 Co-occurrence means domains in the **same protein**, not different members of a
 cluster. The existing documented greedy overlap policy still applies.
 
-## Run a folder of assembled genomes
-
-Place one genome's contigs in each `.fna`, `.fa` or `.fasta` file; `.gz` is accepted.
-Keep output outside the input folder. For a uniformly Gram-positive collection:
-
-```bash
-python genome_pipeline.py \
-  --input /absolute/path/to/genomes \
-  --input-type assembly \
-  --output /absolute/path/to/genome_analysis \
-  --hmm databases/Pfam-A.hmm \
-  --hmm-metadata databases/Pfam.version.txt \
-  --gram positive --threads 32 --inflation 2.0 \
-  --resume
-```
-
-The default `--psortb run` requires working `psort` or imported native results.
-`--signalp auto` and `--phobius auto` run locally if found or configured, otherwise
-record unavailable analyses. LipoP auto imports provided results or runs an explicit
-config; it is otherwise skipped. A detected/configured predictor that fails causes
-an actionable error, rather than silently making the run appear successful.
-`--signalp run --phobius run` requires both supplementary analyses explicitly.
-
-To perform clustering, domains and motifs while localization tools are unavailable:
-
-```bash
-python genome_pipeline.py -i /path/to/genomes --input-type assembly \
-  -o /path/to/analysis --hmm databases/Pfam-A.hmm --gram negative \
-  --psortb skip --signalp skip --phobius skip --lipop skip -t 16 --resume
-```
-
-Such a run reports localization as **unavailable**, never as negative evidence.
-After installing/configuring predictors, rerun the same command with the desired
-predictor flags and `--resume`; the expensive matching stages are reused.
-
-For a mixed collection, create a tab-separated metadata file. `genome` is the
-filename stem, removing `.gz` and the final extension (e.g. `isolate_1.fna.gz` ->
-`isolate_1`). `gram` selects the envelope model; it is never guessed:
-
-```tsv
-genome	gram
-isolate_1	positive
-isolate_2	negative
-```
-
-```bash
-python genome_pipeline.py -i /path/to/genomes -o /path/to/analysis \
-  --hmm databases/Pfam-A.hmm --genome-metadata genomes.tsv -t 32 --resume
-```
-
 ### Annotation policy and mappings
 
 - Assembly inputs use Pyrodigal **meta mode**, masked ambiguous regions, open
@@ -173,83 +143,89 @@ python genome_pipeline.py -i /path/to/genomes -o /path/to/analysis \
   wrapper does not perform neighborhood or operon inference or wrap linear contigs.
   Partial proteins can lack targeting signals, so negative results need caution.
 
-### Predictor configuration, versions, and native imports
+## Native results and custom installations
 
-`--localization-config predictors.json` can specify `version`, `model_files`,
-`argv` and `output` for any supported predictor. Model paths are relative to the
-JSON file; argv paths should be absolute or on PATH. Use JSON arrays of arguments;
-no shell is invoked. Supported placeholders are `{input}`, `{outdir}`, `{gram}`,
-`{gram_flag}` (`-p`/`-n`) and `{threads}`. Output is `stdout` or a relative filename
-beneath `{outdir}`. Wrapper stdout/stderr are logged together, so a stdout-producing
-launcher must avoid progress text that mimics result rows.
+`--localization-import /path/to/results` accepts:
+
+| Filename | Format |
+|---|---|
+| `<genome>.signalp.tsv` | SignalP **4 short** whitespace table (12 columns, native comments) or SignalP **6** `prediction_results.txt` TSV; generation is detected from the content |
+| `<genome>.phobius.txt` | Phobius short ID / TM count / SP Y-or-0 / topology |
+
+The `.tsv` suffix is the import convention even though SignalP 4 separates columns
+with whitespace. IDs may be the safe IDs in `inputs/proteomes/*.faa` or unambiguous
+original IDs within each genome. Imports override execution unless explicitly
+skipped. Missing rows remain unavailable; duplicate, unknown or ambiguous IDs
+fail validation. No Conda environment is required for an import-only run.
+
+`--signalp-version 4` is the execution default (`signalp` on PATH).
+`--signalp-version 6` explicitly selects `signalp6` and its existing adapter;
+`--signalp4-env` is only for generation 4. SignalP 6 installations remain optional.
+
+Custom `--localization-config predictors.json` entries support `argv` (an argument
+array, no shell), `output` (`stdout` or a relative file beneath `{outdir}`),
+`version`, `version_argv`, `model_files`, and `stdin` (boolean). SignalP also accepts
+`format`: `signalp4` or `signalp6`. For example:
 
 ```json
 {
-  "psortb": {
-    "version": "3.0.6",
-    "argv": ["/opt/psort/bin/psort", "{gram_flag}", "-o", "long", "{input}"],
-    "output": "stdout"
-  },
   "signalp": {
-    "version": "6.0i (your installed build)",
-    "argv": ["/opt/signalp-env/bin/signalp6", "--fastafile", "{input}",
-             "--organism", "other", "--output_dir", "{outdir}", "--format", "none",
-             "--mode", "fast", "--torch_num_threads", "{threads}", "--write_procs", "1"],
-    "output": "prediction_results.txt"
+    "format": "signalp4",
+    "argv": ["/home/ark/miniconda3/bin/conda", "run", "--no-capture-output",
+             "-n", "signalP", "signalp", "-t", "{signalp_gram}", "-f", "short", "{input}"],
+    "version_argv": ["/home/ark/miniconda3/bin/conda", "run", "--no-capture-output",
+                     "-n", "signalP", "signalp", "-V"],
+    "output": "stdout"
   }
 }
 ```
 
-Add `"model_files": ["/absolute/path/to/actual/model-file"]` to hash the actual
-installed model files; list all files that determine prediction, not directories.
-No model paths or version strings are invented by the wrapper. It attempts
-`--version` for PSORTb/SignalP when not supplied. Other unavailable versions and
-missing model checksums are explicitly recorded. For a container/launcher,
-record its image digest/version and model files in config. Include the digest in
-`--predictor-cache-tag` if weights cannot be accessed directly. **Change that tag
-when updating models not covered by recorded model checksums.** Default caches
-cannot detect hidden model changes behind an unchanged executable/version.
-LipoP command options vary by installation; use its local help to create an argv
-array producing native short output and set `output` accordingly, or import it.
+Prefer the convenience flags for the installations described above. Do not supply
+both a custom argv and its corresponding convenience flag. Other placeholders are
+`{input}`, `{outdir}`, `{gram}`, `{gram_flag}` (legacy PSORTb), and `{threads}`.
+Model paths are resolved relative to the JSON file. Supply actual installed SignalP
+network/model files in `model_files` for full model provenance. The Conda option
+tracks the SignalP executable automatically; it cannot detect every hidden weight
+file. Add those files or change `--predictor-cache-tag` after updating untracked
+models. Exact commands, versions, executable/model hashes, raw outputs, parsed
+evidence, missing rows and skipped analyses are preserved in the manifest.
 
-Native import files in `--localization-import /path/to/results`:
+The earlier PSORTb/LipoP adapters are retained for compatibility behind explicit
+`--psortb run` / `--lipop run`, but neither is needed by this workflow. Their native
+imports/configuration remain accepted. Their historical TSV columns remain present
+and say unavailable when skipped; the default HTML preview now focuses on SignalP
+and Phobius. No PSORTb Unknown call is invented when it was not run.
 
-| Filename | Accepted format |
+## Interpretation
+
+SignalP and Phobius evidence stays separate. SignalP 4 columns include generation,
+SP yes/no, predicted cleavage boundary, D-score, D cutoff and networks used. Ymax
+is the **first mature residue**, so Ymax=21 is reported as cleavage 20-21. A negative
+call has no assigned cleavage boundary, although raw native scores/positions remain
+available. The predictor's own Y/N decision is used rather than replacing it with
+an invented threshold. Phobius retains TM count, SP flag and full topology.
+
+| Evidence | Transparent feature interpretation |
 |---|---|
-| `<genome>.psortb.tsv` | PSORTb long TSV `SeqID, Final_Localization, Final_Score`; terse `SeqID, Localization, Score` also accepted |
-| `<genome>.signalp.tsv` | SignalP 6 `prediction_results.txt`, including its `# ID` tab header, `Prediction` and `CS Position` |
-| `<genome>.phobius.txt` | Phobius `-short`: ID, TM count, SP `Y/0`, topology |
-| `<genome>.lipop.txt` | LipoP native short lines: `# ID SpII score=... margin=... cleavage=...` (also SpI/TMH/CYT) |
+| Phobius TM count >0 | Putative membrane protein; topology remains available |
+| SignalP or Phobius SP without retained TM evidence | Export signal detected, destination unresolved |
+| Predictors disagree about SP | Both calls retained and disagreement flagged |
+| No SP and no TM detected | `unresolved_no_positive_targeting_evidence`; do not call cytoplasmic from these negatives |
+| Missing predictor | Unavailable, not a negative prediction |
 
-Results may use the safe IDs in `inputs/proteomes/*.faa` or unambiguous original
-IDs within each genome. Imports override local execution for that genome/tool,
-unless the tool is explicitly `skip`. Use `auto` for an import-only optional tool
-if it may be absent for some genomes. Missing rows remain unavailable and are
-counted in warnings, not treated as no-SP/zero-TM. Unknown IDs, conflicting or
-duplicate rows cause an error. Inputs/outputs are hashed; each import is copied
-under `localization/` and marked imported with its provenance. Supply imported
-software versions/model files through the same config for complete provenance.
+Secretion/export, membrane attachment, cell-wall association and extracellular
+exposure remain separate. SignalP 4's `SignalP-TM` **network label is not a count
+of retained TM helices**; Phobius provides that evidence. Neither an SP alone nor
+Phobius's `o` state for a soluble protein establishes extracellular exposure.
 
-## Interpretation and motifs
+SignalP 4 does **not** assess bacterial lipoprotein signals or provide SignalP 6's
+LIPO/TATLIPO/PILIN/TAT classification. With the requested SignalP 4 + Phobius setup,
+`lipoprotein_assessment` stays unavailable. Generic SP-positive proteins are never
+relabeled lipoproteins. See the [SignalP 4.1 documentation](https://services.healthtech.dtu.dk/services/SignalP-4.1/)
+for its output and limitations. Existing eligible installations are used as supplied;
+no licensed predictor or weights are downloaded or redistributed here.
 
-The primary PSORTb localization and score are unchanged. A separate
-`localization_interpretation` refines only Unknown/unavailable baselines:
-
-| Evidence | Feature interpretation |
-|---|---|
-| SignalP LIPO/TATLIPO or LipoP SpII | Putative membrane-attached lipoprotein; membrane identity/exposure unresolved |
-| Phobius TM count >0 | Putative membrane protein; topology retained |
-| SignalP/Phobius/LipoP signal peptide without attachment evidence | Export signal detected, destination unresolved |
-| No supporting evidence | PSORTb Unknown remains Unknown; absent PSORTb remains unavailable |
-
-Confident PSORTb calls are retained even when features conflict, and disagreements
-are flagged. Secretion, membrane attachment, cell-wall association and extracellular
-exposure are separate columns. SP alone does not establish periplasm vs extracellular
-location. A Gram-negative lipoprotein is not assigned inner/outer membrane or an
-outward-facing surface from its lipobox alone. Supplementary rules are transparent
-heuristics, not a newly validated localization classifier. Ambiguous or incomplete
-results should be inspected in native files. Neither motif nor proximity to a
-surface-associated domain demonstrates EET.
+## Motifs
 
 Motifs were verified against pinned source commits (also in every manifest):
 
@@ -312,19 +288,20 @@ proteome matching can be expensive. `--block-size` tunes DIAMOND memory;
 clusters. Full Pfam searches and thousands of per-cluster networks can take substantial
 time/disk space. No million-protein performance claim is made.
 
-## Reproducible synthetic demonstration and tests
+## Reproducible synthetic demo and validation
 
 ```bash
 python examples/make_genome_demo.py --output /tmp/eet-genome-demo
 python genome_pipeline.py -i /tmp/eet-genome-demo/genomes --input-type assembly \
   -o /tmp/eet-genome-demo-analysis --hmm /tmp/eet-genome-demo/models.hmm \
-  --gram positive --psortb skip --signalp skip --phobius skip --lipop skip \
-  --threads 2 --no-plots --resume
+  --gram positive --signalp skip --phobius skip --threads 2 --no-plots --resume
 python -m pytest -q
 ```
 
-The demo generates artificial genomes and HMMs, runs real gene prediction,
-clustering and domain searches, and explicitly leaves localization unassessed.
-Tests use real Pyrodigal/PyHMMER and, when available, real DIAMOND/MCL. Predictor
-adapters use labeled test doubles/native-format fixtures, not real PSORTb,
-SignalP, Phobius or LipoP model inference. See [VALIDATION.md](VALIDATION.md).
+The demo generates artificial genomes and HMMs. It uses real gene prediction,
+clustering and domain searches; localization is explicitly skipped unless actual
+predictors are selected. The MHCscan Phobius bundle was also run on the generated
+24-protein collection and through the complete wrapper. SignalP 4's Conda route
+was tested using labeled executable test doubles and native-format fixtures;
+the user's SignalP installation is not accessible from this execution environment.
+See [VALIDATION.md](VALIDATION.md) for exact checks and remaining limits.

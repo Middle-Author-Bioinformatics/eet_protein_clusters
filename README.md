@@ -9,8 +9,10 @@ Standalone analyses for an already selected collection of candidate EET-related 
    within-protein co-occurrence networks. Single-file mode does not require clustering.
 
 **Genome-folder workflow:** [GENOME_WORKFLOW.md](GENOME_WORKFLOW.md) documents
-`genome_pipeline.py`: gene extraction -> clustering -> domains -> PSORTb baseline,
-optional SignalP/Phobius/LipoP evidence, and per-protein FeGenie/MHCscan motif counts.
+`genome_pipeline.py`: gene extraction -> clustering -> domains -> SignalP 4 and
+Phobius evidence, plus per-protein FeGenie/MHCscan motif counts. An existing SignalP
+Conda environment and MHCscan Phobius folder can be used directly; PSORTb/LipoP
+are skipped by default.
 It retains complete proteomes and uses explicit Gram metadata.
 
 Keep `common.py` and `domain_reports.py` alongside the two standalone scripts. No genome coordinates, earlier EET

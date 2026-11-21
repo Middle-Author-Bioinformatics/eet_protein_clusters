@@ -5,11 +5,12 @@ licensed downloads, or inference of extracellular exposure from an SP alone.
 """
 import csv
 import json
+import math
 from pathlib import Path
 import re
 import shutil
 import subprocess
-from common import LOG, command, mark_stage, sha256, signature, stage_reusable
+from common import LOG, mark_stage, sha256, signature, stage_reusable
 
 TOOLS = ('psortb', 'signalp', 'phobius', 'lipop')
 EXTENSIONS = dict(psortb='psortb.tsv', signalp='signalp.tsv', phobius='phobius.txt', lipop='lipop.txt')
@@ -24,7 +25,27 @@ def parse_native(tool, path):
         if pid in result: raise ValueError(f'{path}: duplicate {tool} prediction for {pid}')
         result[pid] = row
     lines = Path(path).read_text().splitlines()
-    if tool in ['psortb', 'signalp']:
+    signalp4 = tool=='signalp' and any(re.match(r'#\s+(?:SignalP-4|name\s+Cmax)', line) for line in lines)
+    if signalp4:
+        for line in lines:
+            if not line.strip() or line.lstrip().startswith('#'): continue
+            words = line.split()
+            if len(words)!=12 or words[9] not in ['Y', 'N'] or words[11] not in ['SignalP-TM', 'SignalP-noTM']:
+                raise ValueError(f'{path}: expected native SignalP 4 -f short output (12 columns)')
+            try:
+                values = [float(words[i]) for i in [1, 3, 5, 7, 8, 10]]
+                positions = [int(words[i]) for i in [2, 4, 6]]
+                if not all(math.isfinite(x) and 0<=x<=1 for x in values) or min(positions)<1: raise ValueError()
+            except ValueError as exc: raise ValueError(f'{path}: invalid SignalP 4 scores/positions') from exc
+            # Ymax is the FIRST mature residue, not the last SP residue.
+            mature_start = positions[1]
+            if words[9]=='Y' and mature_start<2: raise ValueError(f'{path}: invalid positive SignalP 4 cleavage position')
+            add(words[0], dict(prediction='SP' if words[9]=='Y' else 'OTHER', generation='4',
+                               cleavage=f'{mature_start-1}-{mature_start}' if words[9]=='Y' else '',
+                               d_score=words[8], d_cutoff=words[10], networks=words[11],
+                               lipoprotein_status='not_assessed_by_SignalP4', native=dict(zip(
+                                   ['id','Cmax','Cmax_pos','Ymax','Ymax_pos','Smax','Smax_pos','Smean','D','SP','Dcutoff','networks'], words))))
+    elif tool in ['psortb', 'signalp']:
         key = 'SeqID' if tool == 'psortb' else 'ID'
         # Accept spelling used by older PSORTb releases too.
         header_index = next((i for i, line in enumerate(lines)
@@ -44,7 +65,7 @@ def parse_native(tool, path):
                 prediction = row.get('Prediction', '')
                 if prediction not in ['OTHER', 'SP', 'LIPO', 'TAT', 'TATLIPO', 'PILIN']:
                     raise ValueError(f'{path}: unsupported SignalP 6 prediction {prediction!r}')
-                add(row[id_key], dict(prediction=prediction, cleavage=row.get('CS Position', ''), native=row))
+                add(row[id_key], dict(prediction=prediction, generation='6', cleavage=row.get('CS Position', ''), lipoprotein_status='assessed', native=row))
     elif tool == 'phobius':
         for line in lines:
             words = line.split()
@@ -76,12 +97,14 @@ def map_predictions(predictions, mapping):
     return result
 
 
-def default_command(tool, input_path, outdir, gram, threads, signalp_mode):
+def default_command(tool, input_path, outdir, gram, threads, signalp_mode, signalp_format='signalp6'):
     if tool == 'psortb': return ['psort', '-p' if gram=='positive' else '-n', '-o', 'long', str(input_path)], 'stdout'
+    if tool == 'signalp' and signalp_format=='signalp4':
+        return ['signalp', '-t', 'gram+' if gram=='positive' else 'gram-', '-f', 'short', '-s', 'best', '-c', '70', str(input_path)], 'stdout'
     if tool == 'signalp':
         return ['signalp6', '--fastafile', str(input_path), '--organism', 'other', '--output_dir', str(outdir),
                 '--format', 'none', '--mode', signalp_mode, '--torch_num_threads', str(threads), '--write_procs', '1'], 'prediction_results.txt'
-    if tool == 'phobius': return ['phobius.pl', '-short', str(input_path)], 'stdout'
+    if tool == 'phobius': return ['phobius.pl', '-short'], 'stdout'
     raise ValueError('LipoP execution requires its installation-specific argv in --localization-config; native short output can also be imported')
 
 
@@ -107,14 +130,16 @@ def collect(genome, mapping, args, config, output, manifest):
                 audit.append(entry); data[tool] = {}; continue
             defaults = None
             if 'argv' not in settings:
-                if mode == 'auto' and not shutil.which(EXECUTABLES[tool]):
-                    entry['reason'] = f'{EXECUTABLES[tool]} not found; no import supplied'
+                selected_executable = 'signalp' if tool=='signalp' and settings.get('format')=='signalp4' else EXECUTABLES[tool]
+                if mode == 'auto' and not shutil.which(selected_executable):
+                    entry['reason'] = f'{selected_executable} not found; no import supplied'
                     audit.append(entry); data[tool] = {}; continue
-                defaults = default_command(tool, genome['fasta'], folder.resolve(), genome['gram'], args.threads, args.signalp_mode)
+                defaults = default_command(tool, genome['fasta'], folder.resolve(), genome['gram'], args.threads, args.signalp_mode, settings.get('format', 'signalp6'))
             template = settings.get('argv', defaults[0] if defaults else [])
             if not isinstance(template, list) or not template or not all(isinstance(s, str) for s in template):
                 raise ValueError(f'{tool}: config argv must be a nonempty list of strings (no shell command)')
             context = dict(input=str(Path(genome['fasta']).resolve()), outdir=str(folder.resolve()),
+                           signalp_gram='gram+' if genome['gram']=='positive' else 'gram-',
                            gram=genome['gram'], gram_flag='-p' if genome['gram']=='positive' else '-n', threads=args.threads)
             try: argv = [s.format(**context) for s in template]
             except KeyError as exc: raise ValueError(f'{tool}: unknown argv placeholder {exc}') from exc
@@ -122,12 +147,17 @@ def collect(genome, mapping, args, config, output, manifest):
             if not binary: raise ValueError(f'{tool}: {argv[0]} not found. Install/configure the predictor or provide --localization-import; use --{tool} skip to omit it explicitly. See GENOME_WORKFLOW.md.')
             version = settings.get('version')
             if not version and tool in ['psortb', 'signalp']:
-                probe = subprocess.run([binary, '--version'], capture_output=True, text=True, timeout=30)
+                probe_argv = settings.get('version_argv', [binary, '-V' if tool=='signalp' and settings.get('format')=='signalp4' else '--version'])
+                manifest['commands'].append(probe_argv)
+                probe = subprocess.run(probe_argv, capture_output=True, text=True, timeout=30)
                 version = (probe.stdout+'\n'+probe.stderr).strip() if probe.returncode == 0 else None
             version = version or 'unavailable (supply version in config)'
             model_hashes = {str(Path(p).resolve()): sha256(p) for p in settings.get('model_files', [])}
-            provenance = dict(argv=argv, executable=str(Path(binary).resolve()), executable_sha256=sha256(binary),
+            use_stdin = settings.get('stdin', tool=='phobius' and 'argv' not in settings)
+            result_name = settings.get('output', defaults[1] if defaults else 'stdout')
+            provenance = dict(argv=argv, stdin=use_stdin, result_file=result_name, result_format=settings.get('format', tool), executable=str(Path(binary).resolve()), executable_sha256=sha256(binary),
                               version=version, model_files=model_hashes, cache_tag=args.predictor_cache_tag)
+            if settings.get('model_provenance_note'): manifest['warnings'].append(settings['model_provenance_note'])
             if not model_hashes:
                 manifest['warnings'].append(f'{genome["genome"]}/{tool}: model checksums unavailable; supply config model_files or change --predictor-cache-tag after updating models.')
             key = signature(dict(input=sha256(genome['fasta']), **provenance))
@@ -135,20 +165,20 @@ def collect(genome, mapping, args, config, output, manifest):
             output.mkdir(parents=True, exist_ok=True); folder.mkdir(exist_ok=True)
             reused = stage_reusable(stamp, key, [dest], args.resume and not args.force)
             if not reused:
-                result_name = settings.get('output', defaults[1] if defaults else 'stdout')
                 result_path = folder/result_name
                 if result_name != 'stdout':
                     if Path(result_name).is_absolute() or '..' in Path(result_name).parts:
                         raise ValueError(f'{tool}: output must be a relative filename beneath {{outdir}} or stdout')
                     result_path.unlink(missing_ok=True)
                 logfile = output/f'{tool}.run.log'
-                command(argv, logfile, manifest)
-                if result_name == 'stdout': shutil.copyfile(logfile, dest)
+                run_prediction(argv, genome['fasta'] if use_stdin else None, dest if result_name=='stdout' else folder/'stdout.log', logfile, manifest)
+                if result_name == 'stdout': pass
                 elif result_path.is_file(): shutil.copyfile(result_path, dest)
                 else: raise ValueError(f'{tool}: command succeeded but expected output {result_path} is missing; check localization config')
             entry.update(status='ran', cache_reused=reused, sha256=sha256(dest), **provenance)
         if entry['status'] != 'unavailable':
             data[tool] = map_predictions(parse_native(tool, dest), mapping)
+            if tool=='signalp': entry['detected_generations'] = sorted({v.get('generation', 'unknown') for v in data[tool].values()})
             entry['proteins_assessed'] = len(data[tool])
             if len(data[tool]) < len(mapping):
                 manifest['warnings'].append(f'{genome["genome"]}/{tool}: {len(mapping)-len(data[tool])} proteins have no result; labeled unavailable.')
@@ -160,8 +190,23 @@ def collect(genome, mapping, args, config, output, manifest):
     return data
 
 
+def run_prediction(argv, input_path, stdout_path, logfile, manifest):
+    """Keep stderr banners/warnings out of machine-readable stdout results."""
+    from contextlib import ExitStack
+    LOG.info('Running %s', argv[0]); manifest['commands'].append(argv)
+    with ExitStack() as stack:
+        source = stack.enter_context(open(input_path, 'rb')) if input_path else subprocess.DEVNULL
+        out = stack.enter_context(open(stdout_path, 'w'))
+        err = stack.enter_context(open(logfile, 'w'))
+        proc = subprocess.run(argv, stdin=source, stdout=out, stderr=err)
+    if proc.returncode:
+        tail = '\n'.join(Path(logfile).read_text(errors='replace').splitlines()[-12:])
+        raise ValueError(f'{argv[0]} exited {proc.returncode}. See {logfile}\n{tail}')
+
+
 LOCALIZATION_FIELDS = ['psortb_status', 'psortb_localization', 'psortb_score', 'psortb_secondary',
-                       'signalp_status', 'signalp_prediction', 'signalp_cleavage', 'phobius_status',
+                       'signalp_status', 'signalp_prediction', 'signalp_generation', 'signalp_cleavage',
+                       'signalp_d_score', 'signalp_d_cutoff', 'signalp_networks', 'lipoprotein_assessment', 'phobius_status',
                        'phobius_tm_count', 'phobius_signal_peptide', 'phobius_topology', 'lipop_status',
                        'lipop_prediction', 'secretion_evidence', 'membrane_attachment_evidence',
                        'cell_wall_evidence', 'extracellular_exposure_evidence', 'localization_interpretation',
@@ -194,11 +239,16 @@ def infer(evidence, gram):
         elif tm is not None and tm > 0: inferred = 'putative_membrane_protein'; basis = 'Phobius_TM'
         elif secretion:
             inferred = 'export_signal_detected_destination_unresolved'; basis = 'signal_peptide_prediction'
-        else: inferred = 'Unknown' if p else 'unavailable'; basis = 'insufficient_evidence'
+        else:
+            inferred = 'Unknown' if p else ('unresolved_no_positive_targeting_evidence' if s or t or l else 'unavailable')
+            basis = 'insufficient_evidence'
     return dict(psortb_status='assessed' if p else 'unavailable', psortb_localization=baseline,
                 psortb_score=p.get('score', ''), psortb_secondary=p.get('secondary', ''),
                 signalp_status='assessed' if s else 'unavailable', signalp_prediction=sp or 'unavailable',
-                signalp_cleavage=s.get('cleavage', ''), phobius_status='assessed' if t else 'unavailable',
+                signalp_generation=s.get('generation', 'unavailable'), signalp_cleavage=s.get('cleavage', ''),
+                signalp_d_score=s.get('d_score', ''), signalp_d_cutoff=s.get('d_cutoff', ''),
+                signalp_networks=s.get('networks', ''),
+                lipoprotein_assessment='assessed' if (sp in ['LIPO', 'TATLIPO'] or s.get('generation')=='6' or l) else 'unavailable', phobius_status='assessed' if t else 'unavailable',
                 phobius_tm_count=tm if tm is not None else 'unavailable',
                 phobius_signal_peptide=str(t['signal_peptide']).lower() if t else 'unavailable',
                 phobius_topology=t.get('topology', ''), lipop_status='assessed' if l else 'unavailable',
