@@ -183,3 +183,32 @@ validate adapters and rules, not their biological accuracy or the local installa
 of licensed tools. No user genomes were provided. SignalP/Phobius/LipoP and their
 weights are not redistributed. Supplementary refinements are transparent feature
 annotations, not a validated replacement for PSORTb.
+
+## SignalP 4 + MHCscan Phobius update (version 1.3.1)
+
+**45 tests passed locally**, with the real DIAMOND/MCL tests enabled. Nine new
+cases cover SignalP 4 positive/negative native short output, D-score/cutoff and
+network retention, cleavage coordinates (Ymax=21 -> 20-21), malformed/duplicate
+records, Gram-specific arguments, Conda environment discovery/dispatch/version
+probes, skipped-tool defaults, unavailable lipoprotein assessment, Phobius bundle
+validation, executable permissions and separation of stderr from prediction tables.
+A full wrapper test uses a clearly labeled Conda/SignalP executable test double,
+imports Phobius output, runs real clustering/HMM searches, and checks resumption
+from an output directory containing spaces.
+
+The **actual Phobius 1.01 script, decoder, options and model** already present in
+MHCscan were run locally on the 24-protein artificial assembly demo, both directly
+and through `genome_pipeline.py --phobius-dir`. All 24 result rows parsed and were
+reported assessed. The script's version banner and uninitialized-value warnings
+were retained in stderr logs rather than contaminating the machine-readable table.
+The synthetic collection had zero predicted TM helices; it is an execution/format
+check, not an accuracy benchmark. The bundle was copied only into temporary test
+storage; no predictor binary/model is added to this repository.
+
+The real SignalP 4 installation on TheBelly is not accessible here. Its CLI was
+verified against the user-provided help and its native output against the DTU
+SignalP 4.1 documentation. SignalP model inference was therefore **not** run;
+Conda dispatch uses a labeled test double. PSORTb and LipoP are now explicitly
+skipped by default and were not run. The earlier version 1.3.0 limitations above
+are historical; actual Phobius execution was added in this update. Full Pfam-A
+and biological accuracy/scale benchmarks remain unperformed.

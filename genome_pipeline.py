@@ -16,6 +16,7 @@ from common import (LOG, base_manifest, command, dump, finish, mark_stage, prepa
                     sha256, signature, stage_reusable, versions, writer)
 from genome_inputs import MAP_FIELDS, discover, gram_assignments, prepare
 from localization import LOCALIZATION_FIELDS, TOOLS, collect, infer, EXTENSIONS, EXECUTABLES
+from predictor_setup import configure
 from protein_motifs import COUNT_FIELDS, PATTERNS, SOURCES, characterize
 
 ROOT = Path(__file__).resolve().parent
@@ -30,10 +31,15 @@ def load_config(path):
     value = json.loads(path.read_text())
     if not isinstance(value, dict) or set(value)-set(TOOLS): raise ValueError('Localization config keys: psortb, signalp, phobius, lipop')
     for name, settings in value.items():
-        if not isinstance(settings, dict) or set(settings)-{'argv', 'output', 'version', 'model_files'}:
-            raise ValueError(f'{name}: allowed config fields: argv, output, version, model_files')
+        if not isinstance(settings, dict) or set(settings)-{'argv', 'output', 'version', 'model_files', 'format', 'version_argv', 'stdin'}:
+            raise ValueError(f'{name}: allowed config fields: argv, output, version, model_files, format, version_argv, stdin')
         if 'argv' in settings and (not isinstance(settings['argv'], list) or not settings['argv'] or not all(isinstance(a, str) for a in settings['argv'])):
             raise ValueError(f'{name}: argv must be a nonempty list of strings')
+        if 'format' in settings and (name!='signalp' or settings['format'] not in ['signalp4', 'signalp6']):
+            raise ValueError('format applies only to signalp and must be signalp4 or signalp6')
+        if 'stdin' in settings and not isinstance(settings['stdin'], bool): raise ValueError(f'{name}: stdin must be boolean')
+        if 'version_argv' in settings and (not isinstance(settings['version_argv'], list) or not settings['version_argv'] or not all(isinstance(a,str) for a in settings['version_argv'])):
+            raise ValueError(f'{name}: version_argv must be a nonempty argument list')
         for field in ['output', 'version']:
             if field in settings and not isinstance(settings[field], str): raise ValueError(f'{name}: {field} must be a string')
         if not isinstance(settings.get('model_files', []), list) or not all(isinstance(p, str) for p in settings.get('model_files', [])):
@@ -66,7 +72,8 @@ def preflight(args, files, config):
         if all_imported: continue
         if tool == 'lipop' and 'argv' not in config.get(tool, {}):
             raise ValueError('LipoP run requires installation-specific argv in --localization-config; see GENOME_WORKFLOW.md')
-        executable = config.get(tool, {}).get('argv', [EXECUTABLES[tool]])[0]
+        default_executable = 'signalp' if tool=='signalp' and config.get(tool, {}).get('format')=='signalp4' else EXECUTABLES[tool]
+        executable = config.get(tool, {}).get('argv', [default_executable])[0]
         if not shutil.which(executable):
             raise ValueError(f'{tool}: {executable} not found. Install/configure it, import native results, or select --{tool} skip. See GENOME_WORKFLOW.md.')
 
@@ -140,7 +147,7 @@ def write_annotations(db, output, genomes, manifest):
                 c['phobius_assessed'] += row['phobius_status']=='assessed'
                 c['lipop_assessed'] += row['lipop_status']=='assessed'
             for scope, group in [('genome', genome), ('cluster', cluster)]:
-                for source, field in [('PSORTb', 'psortb_localization'), ('feature_interpretation', 'localization_interpretation')]:
+                for source, field in [('SignalP', 'signalp_prediction'), ('Phobius_SP', 'phobius_signal_peptide'), ('Phobius_TM_count', 'phobius_tm_count'), ('feature_interpretation', 'localization_interpretation')]+([('PSORTb', 'psortb_localization')] if row['psortb_status']=='assessed' else []):
                     distributions[scope, group, source, row[field]] += 1
             if len(preview)<1000: preview.append(row)
     finally: f.close(); m.close()
@@ -169,7 +176,7 @@ def report(output, preview, manifest):
     text = '<!doctype html><html lang="en"><meta charset="utf-8"><title>Genome protein analysis</title>'
     text += '<style>body{font:15px system-ui;margin:2em;color:#173344}table{border-collapse:collapse;font-size:13px}td,th{padding:6px;border:1px solid #ccd}th{background:#e8f0f2}input{padding:8px;width:50%}.scroll{overflow:auto;max-height:65vh}a{color:#006b7a}</style>'
     text += '<h1>Genome protein analysis</h1><p>'+esc(manifest['counts'])+'</p>'
-    text += '<p>Whole proteomes were clustered. Sequence patterns are candidate features; motif counts are not measured heme stoichiometry, binding or EET activity. Signal peptides support export, not a final destination or extracellular exposure. Feature refinements preserve the original PSORTb call. Negative and unassessed predictions remain distinct.</p>'
+    text += '<p>Whole proteomes were clustered. Sequence patterns are candidate features; motif counts are not measured heme stoichiometry, binding or EET activity. Signal peptides support export, not a final destination or extracellular exposure. SignalP and Phobius results are preserved separately; interpretations describe export and membrane attachment. Negative and unassessed predictions remain distinct.</p>'
     links = [('protein_annotations.tsv', 'All protein annotations'), ('genome_summary.tsv', 'Genome summary'),
              ('cluster_evidence_summary.tsv', 'Cluster evidence summary'), ('localization_distribution.tsv', 'Localization distributions'), ('motif_hits.tsv', 'Motif coordinates'),
              ('inputs/protein_mapping.tsv', 'Original CDS mappings'), ('inputs/proteins.faa', 'All proteins'),
@@ -182,8 +189,8 @@ def report(output, preview, manifest):
     def table(title, rows, columns, label):
         rows = list(rows)
         return '<h2>'+esc(title)+'</h2><p>'+esc(label)+'</p><input placeholder="Search this table" oninput="filter(this)"><div class="scroll"><table><thead><tr>'+''.join('<th>'+esc(c)+'</th>' for c in columns)+'</tr></thead><tbody>'+''.join('<tr>'+''.join('<td>'+esc(row.get(c, ''))+'</td>' for c in columns)+'</tr>' for row in rows)+'</tbody></table></div>'
-    text += table('Genomes', read_tsv(output/'genome_summary.tsv'), ['genome', 'gram', 'proteins', 'canonical_mhc_ge2', 'hematite_motif_proteins', 'psortb_assessed', 'psortb_unknown', 'psortb_unavailable', 'unknown_with_feature_refinement'], 'All input genomes')
-    text += table('Proteins', preview, ['protein_id', 'genome', 'original_id', 'cluster', 'cxxch_count', 'mhcscan_hemes', 'fegenie_heme_c_total', 'heme_b_count', 'hematite_count', 'architecture', 'psortb_localization', 'signalp_prediction', 'phobius_tm_count', 'localization_interpretation', 'localization_conflict'], 'Preview: first 1,000 proteins. Download protein_annotations.tsv for every protein; links above contain complete cluster/domain results.')
+    text += table('Genomes', read_tsv(output/'genome_summary.tsv'), ['genome', 'gram', 'proteins', 'canonical_mhc_ge2', 'hematite_motif_proteins', 'signalp_assessed', 'phobius_assessed', 'localization_conflicts'], 'All input genomes')
+    text += table('Proteins', preview, ['protein_id', 'genome', 'original_id', 'cluster', 'cxxch_count', 'mhcscan_hemes', 'fegenie_heme_c_total', 'heme_b_count', 'hematite_count', 'architecture', 'signalp_prediction', 'signalp_generation', 'signalp_cleavage', 'signalp_d_score', 'phobius_signal_peptide', 'phobius_tm_count', 'localization_interpretation', 'localization_conflict'], 'Preview: first 1,000 proteins. Download protein_annotations.tsv for every protein; links above contain complete cluster/domain results.')
     text += '<script>function filter(i){let q=i.value.toLowerCase();i.nextElementSibling.querySelectorAll("tbody tr").forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q))}</script></html>'
     (output/'index.html').write_text(text)
 
@@ -194,12 +201,12 @@ def run(args):
     if args.output == args.input or args.output in args.input.parents or args.input in args.output.parents:
         raise ValueError('Keep input and output directories separate (neither may contain the other)')
     files = discover(args.input, args.input_type); grams = gram_assignments(files, args.gram, args.genome_metadata)
-    config = load_config(args.localization_config); preflight(args, files, config)
+    config = configure(args, load_config(args.localization_config)); preflight(args, files, config)
     log = prepare_output(args.output, args.resume, args.force)
     manifest = base_manifest(args)
     manifest.update(software=versions(['biopython', 'pyhmmer', 'pyrodigal', 'networkx', 'matplotlib']),
                     motif_sources=SOURCES, motif_patterns=PATTERNS, motif_counting='nonoverlapping_per_pattern; positions 1-based inclusive',
-                    localization=[], skipped_analyses=[], stages={}, input_sha256={str(p):sha256(p) for _, p, _ in files})
+                    predictor_configuration=config, localization=[], skipped_analyses=[], stages={}, input_sha256={str(p):sha256(p) for _, p, _ in files})
     commit = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], capture_output=True, text=True)
     manifest['hmm_database'] = dict(path=str(args.hmm), sha256=sha256(args.hmm), model_inventory='domains/model_inventory.tsv')
     if args.hmm_metadata:
@@ -252,7 +259,7 @@ def main(argv=None):
     p.add_argument('--hmm', type=Path, required=True, help='Uncompressed Pfam-A/custom HMM database')
     p.add_argument('--hmm-metadata', type=Path, help='Optional Pfam.version.txt or custom database release metadata, recorded verbatim with checksum')
     p.add_argument('--input-type', choices=['auto', 'assembly', 'genbank', 'proteins'], default='auto')
-    p.add_argument('--gram', choices=['positive', 'negative'], help='PSORTb envelope model for every genome unless metadata overrides')
+    p.add_argument('--gram', choices=['positive', 'negative'], help='Gram group for SignalP 4 (and optional PSORTb); metadata can override per genome')
     p.add_argument('--genome-metadata', type=Path, help='TSV genome (filename stem), gram (positive/negative)')
     p.add_argument('--translation-table', type=int, choices=[4,11], default=11, help='Assembly prediction table; default for GenBank CDS without transl_table')
     p.add_argument('-t', '--threads', type=int, default=8)
@@ -268,11 +275,15 @@ def main(argv=None):
     p.add_argument('--low-memory', action='store_true')
     p.add_argument('--no-plots', action='store_true')
     for tool in TOOLS:
-        p.add_argument('--'+tool, choices=['run', 'auto', 'skip'], default='run' if tool=='psortb' else 'auto',
+        p.add_argument('--'+tool, choices=['run', 'auto', 'skip'], default='skip' if tool in ['psortb', 'lipop'] else 'auto',
                        help='run: require executable or import; auto: run if configured/installed, otherwise mark unavailable; skip: omit explicitly')
     p.add_argument('--localization-import', type=Path, help='Native result folder, <genome>.psortb.tsv/.signalp.tsv/.phobius.txt/.lipop.txt')
     p.add_argument('--localization-config', type=Path, help='JSON argv/version/model_files overrides; no shell execution')
     p.add_argument('--predictor-cache-tag', default='', help='Change after updating models not covered by config model_files')
+    p.add_argument('--signalp-version', choices=['4', '6'], default='4', help='SignalP generation for default execution; imports are detected from native format')
+    p.add_argument('--signalp4-env', help='Existing SignalP 4 Conda environment name or prefix; executed with conda run, no activation needed')
+    p.add_argument('--conda-executable', default='conda', help='Conda binary for --signalp4-env')
+    p.add_argument('--phobius-dir', type=Path, help='Existing MHCscan bin folder containing phobius.pl, decoder, model and options')
     p.add_argument('--signalp-mode', choices=['fast', 'slow-sequential'], default='fast')
     p.add_argument('--resume', action='store_true')
     p.add_argument('--force', action='store_true')
