@@ -5,6 +5,9 @@ import csv
 import json
 import logging
 import math
+import os
+import shutil
+import tempfile
 from pathlib import Path
 import sqlite3
 import sys
@@ -96,14 +99,59 @@ def write_clusters(db,normalized_fasta,groups,out):
     finally:sf.close();mf.close();index.close()
 
 
+
+def storage_info(path):
+    path=Path(path).resolve()
+    usage=shutil.disk_usage(path)
+    info=dict(path=str(path),total_bytes=usage.total,free_bytes=usage.free)
+    if hasattr(os,'statvfs'):
+        fs=os.statvfs(path)
+        info.update(free_inodes=fs.f_favail,total_inodes=fs.f_files)
+    return info
+
+
+def diamond_search(args,normalized,work,hits,manifest):
+    """Use an isolated scratch directory, cleaning only files owned by this run."""
+    requested=getattr(args,'tmpdir',None)
+    parent=Path(requested or os.environ.get('TMPDIR') or work).expanduser().resolve()
+    parent.mkdir(parents=True,exist_ok=True)
+    manifest['storage']=dict(output=storage_info(work),scratch_parent=storage_info(parent),
+                             scratch_source='--tmpdir' if requested else ('TMPDIR' if os.environ.get('TMPDIR') else 'output/work'))
+    for label in ['output','scratch_parent']:
+        item=manifest['storage'][label]
+        LOG.info('%s: %s; %.1f GiB free',label,item['path'],item['free_bytes']/1024**3)
+    with tempfile.TemporaryDirectory(prefix='eet-diamond-',dir=parent) as scratch:
+        manifest['storage'].update(scratch_run_directory=scratch,scratch_cleanup='pending')
+        dump(args.output/'manifest.inprogress.json',manifest)
+        try:
+            command(['diamond','makedb','--in',normalized,'--db',work/'proteins.dmnd','--threads',args.threads],work/'diamond_makedb.log',manifest)
+            command(['diamond','blastp','--db',work/'proteins.dmnd','--query',normalized,'--out',hits,
+                     '--threads',args.threads,'--'+args.sensitivity,'--evalue',args.evalue,
+                     '--max-target-seqs','0','--max-hsps','1','--block-size',args.block_size,
+                     '--tmpdir',scratch,'--outfmt','6',*FIELDS],work/'diamond_blastp.log',manifest)
+        except (ValueError,OSError) as exc:
+            detail=str(exc).lower()
+            if any(term in detail for term in ['no space left','disk quota exceeded']):
+                raise ValueError(f'DIAMOND exhausted disk space, inodes or quota. Scratch parent: {parent}; output/work: {work.resolve()}. '
+                                 'Check df -h and df -i on BOTH paths (and your quota). Use --tmpdir on a larger filesystem and put --output there too if necessary. '
+                                 'A smaller --block-size (e.g. 0.4) reduces temporary space but can change alignments slightly. '
+                                 'Rerun with --resume; this failed DIAMOND search restarts, while completed valid searches can be reused. '
+                                 f'Original error: {exc}') from exc
+            raise
+        finally:
+            manifest['storage']['scratch_cleanup']='managed_by_TemporaryDirectory'
+    manifest['storage']['scratch_cleanup']='removed'
+
+
 def run(args):
     if not all(math.isfinite(x) for x in [args.inflation,args.evalue,args.min_identity,args.min_coverage,args.evalue_cap,args.block_size]):raise ValueError('Numeric parameters must be finite')
     if args.threads<1 or args.inflation<=1 or not 0<args.evalue<1 or not 0<=args.min_identity<=100 or not 0<=args.min_coverage<=1 or not 1<=args.evalue_cap<=300 or args.block_size<=0:
         raise ValueError('threads >=1, inflation >1, 0<evalue<1, identity 0..100, coverage 0..1, E-value cap 1..300, block-size>0 required')
     log=prepare_output(args.output,args.resume,args.force)
     db=None
+    manifest=base_manifest(args)
     try:
-        manifest=base_manifest(args);manifest['input_sha256']=sha256(args.input)
+        manifest['input_sha256']=sha256(args.input)
         manifest['software']=versions(['biopython'])
         manifest['software']['mcl']=tool_version('mcl')
         if not args.hits:manifest['software']['mcxload']=tool_version('mcxload')
@@ -115,17 +163,18 @@ def run(args):
             hits=args.hits;manifest['hits_sha256']=sha256(hits)
         else:
             manifest['software']['diamond']=tool_version('diamond','version')
-            diamond_db=work/'proteins.dmnd';hits=work/'diamond_hits.tsv'
+            hits=work/'diamond_hits.tsv'
             key=signature(dict(input=sha256(normalized),diamond=manifest['software']['diamond'],evalue=args.evalue,
                                sensitivity=args.sensitivity,threads=args.threads,block_size=args.block_size,max_targets=0,max_hsps=1))
             stamp=work/'diamond.stage.json'
-            if stage_reusable(stamp,key,[hits],args.resume and not args.force):LOG.info('Reusing completed DIAMOND search')
+            if stage_reusable(stamp,key,[hits],args.resume and not args.force):
+                LOG.info('Reusing completed DIAMOND search')
+                manifest['diamond_search_cache_reused']=True
+                manifest['storage']=dict(output=storage_info(work),scratch_not_used='completed search reused')
             else:
-                command(['diamond','makedb','--in',normalized,'--db',diamond_db,'--threads',args.threads],work/'diamond_makedb.log',manifest)
-                command(['diamond','blastp','--db',diamond_db,'--query',normalized,'--out',hits,
-                         '--threads',args.threads,'--'+args.sensitivity,'--evalue',args.evalue,
-                         '--max-target-seqs','0','--max-hsps','1','--block-size',args.block_size,
-                         '--outfmt','6',*FIELDS],work/'diamond_blastp.log',manifest)
+                manifest['diamond_search_cache_reused']=False
+                stamp.unlink(missing_ok=True)
+                diamond_search(args,normalized,work,hits,manifest)
                 mark_stage(stamp,key,[hits])
         edges=work/'edges.abc'
         stats=build_graph(db,hits,edges,args,internal=not args.hits)
@@ -146,6 +195,13 @@ def run(args):
         manifest['output_sha256']={name:sha256(args.output/name) for name in ['membership.tsv','cluster_summary.tsv','id_mapping.tsv']}
         finish(args.output,manifest)
         LOG.info('Wrote %d cluster FASTAs to %s',len(groups),args.output/'clusters')
+    except Exception as exc:
+        scratch=manifest.get('storage',{}).get('scratch_run_directory')
+        if scratch: manifest['storage']['scratch_cleanup']='removed' if not Path(scratch).exists() else 'incomplete'
+        manifest['error']=str(exc)
+        try: dump(args.output/'manifest.inprogress.json',manifest)
+        except OSError as report_error: LOG.error('Could not save failure manifest: %s',report_error)
+        raise
     finally:
         if db:db.close()
         LOG.removeHandler(log);log.close()
@@ -164,6 +220,7 @@ def main(argv=None):
     p.add_argument('--weight',choices=['neglog10-evalue','bitscore'],default='neglog10-evalue',help='MCL edge weight')
     p.add_argument('--evalue-cap',type=float,default=200.,help='Cap -log10(E); handles zero E-values')
     p.add_argument('--block-size',type=float,default=2.,help='DIAMOND block size in billions of letters; lower reduces memory')
+    p.add_argument('--tmpdir','--diamond-tmpdir',dest='tmpdir',type=Path,help='DIAMOND scratch parent; default $TMPDIR or OUTPUT/work. Final results still use --output')
     p.add_argument('--hits',type=Path,help='Reuse custom 12-column similarity TSV with ORIGINAL IDs; see README')
     p.add_argument('--resume',action='store_true',help='Reuse checksum-matching DIAMOND output; regenerate graph and clusters')
     p.add_argument('--force',action='store_true',help='Recompute into an existing output directory')

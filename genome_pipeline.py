@@ -232,9 +232,10 @@ def run(args):
             paths = [inputs/'proteins.faa', inputs/'protein_mapping.tsv', index]+[Path(g['fasta']) for g in genomes]
             mark_stage(stamp, key, paths)
         manifest['stages']['gene_extraction'] = dict(cache_reused=reused, signature=key, genomes=genomes)
+        cluster_extra=['--tmpdir',args.tmpdir] if args.tmpdir else []
         child('cluster_proteins.py', ['-i', inputs/'proteins.faa', '-o', args.output/'clustering', '-t', args.threads,
               '--inflation', args.inflation, '--min-identity', args.min_identity, '--min-coverage', args.min_coverage,
-              '--evalue', args.evalue, '--sensitivity', args.sensitivity, '--block-size', args.block_size], args.output/'clustering.log', args, manifest)
+              '--evalue', args.evalue, '--sensitivity', args.sensitivity, '--block-size', args.block_size]+cluster_extra, args.output/'clustering.log', args, manifest)
         domain_args = ['-i', args.output/'clustering/clusters', '-o', args.output/'domains', '--hmm', args.hmm,
                        '-t', args.threads, '--min-model-coverage', args.min_model_coverage, '--overlap-policy', args.overlap_policy]
         if args.domain_evalue is not None: domain_args += ['--domain-evalue', args.domain_evalue]
@@ -269,6 +270,7 @@ def main(argv=None):
     p.add_argument('--evalue', type=float, default=1e-5)
     p.add_argument('--sensitivity', choices=['sensitive', 'very-sensitive', 'ultra-sensitive'], default='very-sensitive')
     p.add_argument('--block-size', type=float, default=2.)
+    p.add_argument('--tmpdir','--diamond-tmpdir',dest='tmpdir',type=Path,help='DIAMOND scratch parent, forwarded to clustering; default $TMPDIR or clustering/work')
     p.add_argument('--domain-evalue', type=float, help='Explicit fallback for HMMs without GA; Pfam GA preferred')
     p.add_argument('--min-model-coverage', type=float, default=0.)
     p.add_argument('--overlap-policy', choices=['best', 'all'], default='best')
