@@ -21,6 +21,7 @@ jobs:
       - run: python cluster_domains.py --help
       - run: python genome_pipeline.py --help
       - run: python network_reports.py --help
+      - run: python annotate_clusters_nr.py --help
       - uses: actions/upload-artifact@v4
         if: always()
         with:

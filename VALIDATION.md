@@ -286,3 +286,22 @@ The user's aggregate domain GraphML has no protein IDs or protein alignment
 identities. Its updated standalone preview can show domain links and counts;
 carrier lists and the protein-identity view require the original architecture
 and clustering outputs. No identities are inferred from aggregate statistics.
+
+## Standalone NR header annotation
+
+`tests/test_nr_annotation.py` tests same-named output FASTAs, unchanged first-token
+IDs, original descriptions, record ordering, unchanged sequence lines including
+case/terminal stops/CRLF, gzip inputs, duplicate IDs across files, empty files,
+no-hit records, missing database titles, score ranking/ties without a preference
+for named functions, invalid alignments/sequences, safe output paths, stale-owned
+file cleanup, and checksum-verified resume invalidation for changed inputs,
+database fingerprints, search settings, or corrupt raw hits. An injected
+disk-full failure checks partial-file/stamp invalidation and owned scratch cleanup.
+
+Two integration tests run actual DIAMOND against small synthetic protein
+databases: title extraction, equal-score hits, no-hit and ID-only-title records,
+resume, and a short stronger match versus a broader lower-scoring qualifying
+match. The latter checks that coverage filtering can retain the broader hit.
+No full NR search or benchmark on TheBelly was run; its database and proteins
+are unavailable in this workspace. Database content/annotation quality and NR-scale
+runtime/space requirements are therefore not established by these tests.
