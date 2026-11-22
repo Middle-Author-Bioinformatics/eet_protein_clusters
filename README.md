@@ -24,6 +24,11 @@ views and named-domain co-occurrence communities, including regenerating existin
 results without searches, clickable Pfam entries, and searchable/downloadable
 protein lists for each domain or co-occurring domain pair.
 
+**NR annotation of cluster FASTAs:** [NR_ANNOTATION.md](NR_ANNOTATION.md) documents
+`annotate_clusters_nr.py`: one DIAMOND search of all cluster proteins followed by
+same-named FASTAs with top-hit descriptions appended to the original headers.
+The script also runs independently with Python's standard library and DIAMOND.
+
 ## 1. Install on TheBelly / Linux
 
 After unzipping this package, enter its directory. The simplest installation is a
