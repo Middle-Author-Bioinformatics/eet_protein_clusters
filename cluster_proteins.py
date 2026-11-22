@@ -8,6 +8,7 @@ import math
 import os
 import shutil
 import tempfile
+from interactive_network import options as network_options, validate as validate_network, protein_network
 from pathlib import Path
 import sqlite3
 import sys
@@ -21,7 +22,7 @@ FIELDS=['qseqid','sseqid','pident','length','qstart','qend','sstart','send','eva
 def build_graph(db,hits,output,args,internal=False):
     """Deduplicate a symmetric graph on disk, max weight per unordered pair."""
     db.execute('DROP TABLE IF EXISTS edges')
-    db.execute('CREATE TABLE edges (a INTEGER,b INTEGER,weight REAL,PRIMARY KEY(a,b)) WITHOUT ROWID')
+    db.execute('CREATE TABLE edges (a INTEGER,b INTEGER,weight REAL,identity_percent REAL,coverage_a REAL,coverage_b REAL,evalue REAL,bitscore REAL,PRIMARY KEY(a,b)) WITHOUT ROWID')
     stats=dict(hit_rows=0,self_hits=0,filtered_rows=0,qualifying_rows=0)
     # A small ID cache avoids a SQL lookup per repeated hit without O(N^2) memory.
     from functools import lru_cache
@@ -48,7 +49,8 @@ def build_graph(db,hits,output,args,internal=False):
             weight=min(args.evalue_cap,-math.log10(max(ev,10**(-args.evalue_cap)))) if args.weight=='neglog10-evalue' else bit
             if weight<=0:stats['filtered_rows']+=1;continue
             a,b=sorted((qi,si))
-            db.execute('INSERT INTO edges VALUES(?,?,?) ON CONFLICT(a,b) DO UPDATE SET weight=MAX(weight,excluded.weight)',(a,b,weight))
+            ca,cb=(qcov,scov) if qi==a else (scov,qcov)
+            db.execute('INSERT INTO edges VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(a,b) DO UPDATE SET weight=excluded.weight,identity_percent=excluded.identity_percent,coverage_a=excluded.coverage_a,coverage_b=excluded.coverage_b,evalue=excluded.evalue,bitscore=excluded.bitscore WHERE excluded.weight>edges.weight OR (excluded.weight=edges.weight AND excluded.bitscore>edges.bitscore)',(a,b,weight,identity,ca,cb,ev,bit))
             stats['qualifying_rows']+=1
             if stats['hit_rows']%1000000==0:
                 db.commit();LOG.info('Processed %d alignment rows',stats['hit_rows'])
@@ -81,6 +83,8 @@ def memberships(db,path):
 
 def write_clusters(db,normalized_fasta,groups,out):
     from Bio import SeqIO
+    db.execute('DROP TABLE IF EXISTS membership')
+    db.execute('CREATE TABLE membership(n INTEGER PRIMARY KEY,cluster TEXT)')
     # SeqIO.index uses file offsets, not the protein sequences in RAM.
     index=SeqIO.index(str(normalized_fasta),'fasta')
     cluster_dir=out/'clusters';cluster_dir.mkdir(exist_ok=True)
@@ -92,11 +96,13 @@ def write_clusters(db,normalized_fasta,groups,out):
             name=f'cluster_{i:06d}';lengths=[]
             with open(cluster_dir/(name+'.faa'),'w') as fasta:
                 for n in members:
+                    db.execute('INSERT INTO membership VALUES (?,?)',(n,name))
                     internal,original,header,length=db.execute('SELECT internal,original,header,length FROM proteins WHERE n=?',(n,)).fetchone()
                     fasta.write(f'>{header}\n{str(index[internal].seq)}\n');lengths.append(length)
                     mw.writerow(dict(cluster=name,protein_id=original,internal_id=internal,length_aa=length))
             sw.writerow(dict(cluster=name,n_proteins=len(members),min_length=min(lengths),mean_length=round(sum(lengths)/len(lengths),2),max_length=max(lengths),singleton=len(members)==1,fasta=f'clusters/{name}.faa'))
     finally:sf.close();mf.close();index.close()
+    db.commit()
 
 
 
@@ -144,6 +150,7 @@ def diamond_search(args,normalized,work,hits,manifest):
 
 
 def run(args):
+    validate_network(args)
     if not all(math.isfinite(x) for x in [args.inflation,args.evalue,args.min_identity,args.min_coverage,args.evalue_cap,args.block_size]):raise ValueError('Numeric parameters must be finite')
     if args.threads<1 or args.inflation<=1 or not 0<args.evalue<1 or not 0<=args.min_identity<=100 or not 0<=args.min_coverage<=1 or not 1<=args.evalue_cap<=300 or args.block_size<=0:
         raise ValueError('threads >=1, inflation >1, 0<evalue<1, identity 0..100, coverage 0..1, E-value cap 1..300, block-size>0 required')
@@ -190,6 +197,10 @@ def run(args):
             mcl_output.write_text('');manifest['warnings'].append('No qualifying similarity edges; all proteins retained as singleton clusters.')
         groups=memberships(db,mcl_output)
         write_clusters(db,normalized,groups,args.output)
+        if not args.no_interactive:
+            manifest['interactive_network']=protein_network(db,args.output,args,args.domain_profiles)
+        else:
+            for name in ['protein_network.html','protein_network_nodes.tsv','protein_network_edges.tsv','index.html']:(args.output/name).unlink(missing_ok=True)
         manifest['counts']=dict(proteins=total,clusters=len(groups),singletons=sum(len(g)==1 for g in groups),**stats)
         manifest['graph_definition']='Undirected max over qualifying directional hits; self-hits excluded; isolates restored as singletons'
         manifest['output_sha256']={name:sha256(args.output/name) for name in ['membership.tsv','cluster_summary.tsv','id_mapping.tsv']}
@@ -221,6 +232,9 @@ def main(argv=None):
     p.add_argument('--evalue-cap',type=float,default=200.,help='Cap -log10(E); handles zero E-values')
     p.add_argument('--block-size',type=float,default=2.,help='DIAMOND block size in billions of letters; lower reduces memory')
     p.add_argument('--tmpdir','--diamond-tmpdir',dest='tmpdir',type=Path,help='DIAMOND scratch parent; default $TMPDIR or OUTPUT/work. Final results still use --output')
+    network_options(p)
+    p.add_argument('--network-cluster',help='Focus the interactive protein view on one MCL cluster; clustering itself is unchanged')
+    p.add_argument('--domain-profiles',type=Path,help='Optional cluster_domains output folder; annotate protein nodes with domain names')
     p.add_argument('--hits',type=Path,help='Reuse custom 12-column similarity TSV with ORIGINAL IDs; see README')
     p.add_argument('--resume',action='store_true',help='Reuse checksum-matching DIAMOND output; regenerate graph and clusters')
     p.add_argument('--force',action='store_true',help='Recompute into an existing output directory')

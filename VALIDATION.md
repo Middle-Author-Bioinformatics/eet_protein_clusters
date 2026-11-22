@@ -232,3 +232,36 @@ accessible here, so this does not establish peak disk requirements or prove whic
 mount, quota or inode limit caused that specific run to fail. The established
 block-size default 2.0 is retained; the documented recovery command explicitly
 selects 0.4 and notes the potential for slightly different alignments.
+
+## Interactive networks (version 1.4.0)
+
+Local validation: **59 tests passed; 1 actual-browser test skipped**. Real
+DIAMOND/MCL and PyHMMER integration checks remain enabled. New analysis checks
+verify selected-HSP identity/coverage provenance, reversed coverage endpoints,
+retained MCL memberships/isolates, named and repeated domain architectures,
+pooled same-protein counts, Louvain communities/isolates, empty networks, display
+limits, HTML/JSON escaping, and checksum-verified reconstruction of old graphs
+without rerunning DIAMOND. `--no-interactive` cleanup is checked while reusing
+cached HMM searches.
+
+CI passed all **60 tests**, including the actual-browser test, on Python 3.11
+and 3.12. The browser test is configured in CI on both Python versions. It opens the
+self-contained HTML offline in Chromium, tests domain-name/accession search,
+neighbor expansion, group and edge-threshold filters, hide-isolated, reset,
+selection/details, zoom, canvas dragging, JSON download and PNG export, and checks
+for JavaScript errors. CI uploads a screenshot artifact. These checks use a small
+synthetic graph; they are not biological accuracy or large-browser benchmarks.
+
+The local Chromium launcher could not start because this execution environment
+blocks its process-singleton socket; the alternate headless-shell download was
+also unavailable. Therefore local browser rendering is not claimed. CI provides
+the actual browser execution result. No new localization model or full Pfam-A
+analysis was run for this reporting change.
+
+Protein MCL edge weights and scientific filtering are unchanged. Identity metadata
+follows the selected maximum-weight HSP (ties prefer higher bit score). Protein
+views do not calculate genome AAI. Domain communities use weighted Louvain on
+Jaccard-weighted exported co-occurrence graphs (resolution 1, seed 17); UI filters
+change only the view. Bounded HTML exports state their sampling and displayed vs
+complete counts. Complete memberships, selected protein-edge metadata and domain
+GraphML remain available independently of display limits.

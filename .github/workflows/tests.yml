@@ -3,6 +3,10 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      EET_BROWSER_EXECUTABLE: /usr/bin/google-chrome
+      REQUIRE_BROWSER_TESTS: 1
+      NETWORK_TEST_ARTIFACTS: test-artifacts
     strategy:
       matrix:
         python: ['3.11', '3.12']
@@ -12,7 +16,14 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: sudo apt-get update && sudo apt-get install -y mcl diamond-aligner
-      - run: python -m pip install -r requirements-genomes.txt pytest
+      - run: python -m pip install -r requirements-dev.txt
       - run: python -m pytest -q
       - run: python cluster_domains.py --help
       - run: python genome_pipeline.py --help
+      - run: python network_reports.py --help
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: network-preview-${{ matrix.python }}
+          path: test-artifacts/
+          if-no-files-found: ignore

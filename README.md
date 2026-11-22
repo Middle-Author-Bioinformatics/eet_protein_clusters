@@ -15,9 +15,13 @@ Conda environment and MHCscan Phobius folder can be used directly; PSORTb/LipoP
 are skipped by default.
 It retains complete proteomes and uses explicit Gram metadata.
 
-Keep `common.py` and `domain_reports.py` alongside the two standalone scripts. No genome coordinates, earlier EET
+Keep the repository modules and network viewer templates together when running the scripts. No genome coordinates, earlier EET
 wrapper, FeGenie checkout, or web submission is required. No new EET activity
 classification is made. These scripts also work for other preselected protein sets.
+
+**Interactive HTML networks:** [NETWORKS.md](NETWORKS.md) covers protein identity/MCL
+views and named-domain co-occurrence communities, including regenerating existing
+results without searches.
 
 ## 1. Install on TheBelly / Linux
 
@@ -59,7 +63,8 @@ python -m pip install -r requirements.txt
 
 The same requirements file also works in an existing clustering environment.
 `mcl`, `mcxload` and `diamond` are required only by `cluster_proteins.py`.
-Keep `common.py` and `domain_reports.py` next to `cluster_domains.py` when copying it elsewhere.
+Keep `common.py`, `domain_reports.py`, `interactive_network.py`, `network_viewer.html`
+and `network_viewer.js` next to `cluster_domains.py` when copying it elsewhere.
 
 PyHMMER includes the HMMER search engine, so domain profiling does not require a
 separate `hmmsearch` executable or `hmmpress`. No restricted localization software
