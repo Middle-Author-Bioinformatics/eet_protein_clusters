@@ -236,14 +236,14 @@ def run(args):
             paths = [inputs/'proteins.faa', inputs/'protein_mapping.tsv', index]+[Path(g['fasta']) for g in genomes]
             mark_stage(stamp, key, paths)
         manifest['stages']['gene_extraction'] = dict(cache_reused=reused, signature=key, genomes=genomes)
-        network_extra=['--network-max-nodes',args.network_max_nodes,'--network-max-edges',args.network_max_edges]+(['--no-interactive'] if args.no_interactive else [])
+        network_extra=['--network-max-nodes',args.network_max_nodes,'--network-max-edges',args.network_max_edges,'--network-max-proteins',args.network_max_proteins]+(['--no-interactive'] if args.no_interactive else [])
         cluster_extra=(['--tmpdir',args.tmpdir] if args.tmpdir else [])+network_extra
         child('cluster_proteins.py', ['-i', inputs/'proteins.faa', '-o', args.output/'clustering', '-t', args.threads,
               '--inflation', args.inflation, '--min-identity', args.min_identity, '--min-coverage', args.min_coverage,
               '--evalue', args.evalue, '--sensitivity', args.sensitivity, '--block-size', args.block_size]+cluster_extra, args.output/'clustering.log', args, manifest)
         domain_args = ['-i', args.output/'clustering/clusters', '-o', args.output/'domains', '--hmm', args.hmm,
                        '-t', args.threads, '--min-model-coverage', args.min_model_coverage, '--overlap-policy', args.overlap_policy]
-        domain_args+=network_extra
+        domain_args+=network_extra+['--clustering',args.output/'clustering']
         if args.domain_evalue is not None: domain_args += ['--domain-evalue', args.domain_evalue]
         if args.no_plots: domain_args.append('--no-plots')
         if args.low_memory: domain_args.append('--low-memory')

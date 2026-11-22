@@ -231,6 +231,8 @@ def summarize(db,out,args,input_mode='clusters'):
                              domain_names=';'.join(names.get(a,a) for a in dset.split(';') if a)))
     finally:af.close();pf.close()
     db.commit()
+    from domain_members import DomainMembers
+    members=DomainMembers(out) if not args.no_interactive else None
     global_counts=Counter()
     for counter in counts.values():global_counts.update(counter)
     summary_fields=['dataset','total_proteins','proteins_with_domains','proteins_without_domains','fraction_with_domains','distinct_domains','domain_copies','cooccurrence_pairs','top_domain','top_domain_fraction'] if standalone else ['cluster','n_proteins','proteins_with_domains','fraction_with_domains','distinct_domains','domain_copies','cooccurrence_pairs','top_domain','top_domain_fraction']
@@ -275,7 +277,7 @@ def summarize(db,out,args,input_mode='clusters'):
                 ew.writerow(row)
                 if k>=args.min_pair_count:graph.add_edge(a,b,**{key:val for key,val in row.items() if key not in ['domain_a','domain_b']})
             ef.close()
-            domain_network(graph,folder,args,title=f'{c}: domain co-occurrence')
+            domain_network(graph,folder,args,title=f'{c}: domain co-occurrence',members=members)
             nx.write_graphml(graph,folder/'domain_network.graphml')
             if not args.no_plots:draw_network(graph,folder/'domain_network.svg',args.max_plot_nodes,args.max_plot_edges,c,n)
             top=max(counts[c],key=lambda a:counts[c][a]) if counts[c] else ''
@@ -301,7 +303,7 @@ def summarize(db,out,args,input_mode='clusters'):
         if k>=args.min_pair_count:
             na,nb=global_counts[a],global_counts[b]
             pooled.add_edge(a,b,proteins_with_both=k,fraction_proteins=k/total,jaccard=k/(na+nb-k),lift=k*total/(na*nb),p_b_given_a=k/na,p_a_given_b=k/nb)
-    domain_network(pooled,out,args,stem='all_domains_network',title='All proteins: domain co-occurrence')
+    domain_network(pooled,out,args,stem='all_domains_network',title='All proteins: domain co-occurrence',members=members)
     nx.write_graphml(pooled,out/'all_domains_network.graphml')
     text='''<!doctype html><html lang="en"><meta charset="utf-8"><title>Protein cluster domain profiles</title><style>body{font:15px system-ui;margin:30px;color:#244}td,th{padding:8px;border:1px solid #ccd}table{border-collapse:collapse}input{padding:10px;margin:10px}a{color:#08796c}</style><h1>Protein cluster domain profiles</h1><p>Prevalence uses all cluster proteins, including proteins with no detected domains. Edges mean domains in the same protein; repeats do not multiply edges. These are descriptive associations, not evidence of physical interaction, operons or EET activity.</p><input id="q" placeholder="Search clusters"><table><thead><tr>'''
     if not args.no_interactive:text=text.replace('<input id="q"','<p><a href="all_domains_network.html">Interactive domain network across all proteins</a></p><input id="q"')
@@ -395,6 +397,7 @@ def main(argv=None):
     p.add_argument('--model-batch-size',type=int,default=128,help='Models per batch; bounded HMM memory')
     p.add_argument('--low-memory',action='store_true',help='Stream targets from disk instead of holding digital protein sequences in memory')
     network_options(p)
+    p.add_argument('--clustering',type=Path,help='Completed protein clustering folder, for a link to its identity network')
     p.add_argument('--no-plots',action='store_true',help='Skip SVG rendering; interactive HTML, GraphML and tables remain available')
     p.add_argument('--resume',action='store_true',help='Reuse checksum-matching HMM searches, regenerate summaries/networks')
     p.add_argument('--force',action='store_true',help='Recompute into existing output')

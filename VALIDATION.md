@@ -265,3 +265,24 @@ Jaccard-weighted exported co-occurrence graphs (resolution 1, seed 17); UI filte
 change only the view. Bounded HTML exports state their sampling and displayed vs
 complete counts. Complete memberships, selected protein-edge metadata and domain
 GraphML remain available independently of display limits.
+
+## Pfam links and carrier proteins (version 1.4.1)
+
+Local validation passed **66 tests**, with the actual-browser test skipped because
+of the local Chromium launch limitation described above. CI passed **all 67 tests**
+on Python 3.11 and 3.12, including the actual offline browser interactions.
+
+Tests check carrier identities against selected same-protein domain sets, repeated
+domains, pooled/per-cluster scope, native single-FASTA outputs, domain-negative
+proteins, full pair exports, embedding caps including zero, cache invalidation,
+duplicate IDs, missing architectures, mismatched domain and pair counts, and
+relative links between domain and protein-identity reports. Real PyHMMER searches
+exercise automatic embedding and report-only rebuilding without a rescan.
+The offline browser test additionally checks version-stripped Pfam URLs, custom
+accessions without invented links, node/pair lists, carrier search, TSV downloads
+independent of that search, and partial/unavailable states.
+
+The user's aggregate domain GraphML has no protein IDs or protein alignment
+identities. Its updated standalone preview can show domain links and counts;
+carrier lists and the protein-identity view require the original architecture
+and clustering outputs. No identities are inferred from aggregate statistics.

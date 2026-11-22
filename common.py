@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
-VERSION = '1.4.0'
+VERSION = '1.4.1'
 LOG = logging.getLogger('eet-clusters')
 
 

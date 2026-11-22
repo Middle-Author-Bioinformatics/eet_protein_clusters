@@ -2,6 +2,7 @@
 import html
 import json
 import math
+import os
 import re
 from pathlib import Path
 from collections import Counter, defaultdict
@@ -17,26 +18,32 @@ def options(parser):
                         help='Maximum nodes embedded per interactive HTML; complete analysis is retained')
     parser.add_argument('--network-max-edges', type=int, default=DEFAULT_EDGES,
                         help='Maximum strongest edges embedded per interactive HTML')
+    parser.add_argument('--network-max-proteins', type=int, default=20000,
+                        help='Maximum unique domain-carrying proteins embedded per domain HTML (default 20000; 0 disables lists)')
 
 
 def validate(args):
     if args.network_max_nodes<1 or args.network_max_edges<0:
         raise ValueError('network-max-nodes must be >=1 and network-max-edges >=0')
+    if getattr(args,'network_max_proteins',20000)<0:
+        raise ValueError('network-max-proteins must be >=0')
 
 
-def write_html(path, nodes, edges, title, kind, definition, total_nodes=None, total_edges=None, selection='All nodes', downloads=()):
+def write_html(path, nodes, edges, title, kind, definition, total_nodes=None, total_edges=None, selection='All nodes', downloads=(), members=None):
     """All data, layout and JavaScript are embedded; file:// works without a CDN."""
     groups=defaultdict(list)
     for node in nodes: groups[str(node.get('group', 'ungrouped'))].append(node)
-    for gi, (group, members) in enumerate(sorted(groups.items())):
+    for gi, (group, group_nodes) in enumerate(sorted(groups.items())):
         angle=gi*2.399963229728653;radius=math.sqrt(gi)*200
         cx,cy=radius*math.cos(angle),radius*math.sin(angle)
-        for i,node in enumerate(members):
+        for i,node in enumerate(group_nodes):
             a=i*2.399963229728653;r=math.sqrt(i)*28
             node.update(x=cx+r*math.cos(a),y=cy+r*math.sin(a))
     payload=dict(kind=kind,title=title,nodes=nodes,edges=edges,definition=definition,selection=selection,
                  total_nodes=len(nodes) if total_nodes is None else total_nodes,
                  total_edges=len(edges) if total_edges is None else total_edges)
+    if kind=='domains':
+        payload['members']=members or dict(available=False,reason='Protein IDs unavailable: aggregate graph data do not contain carriers. Regenerate with the original protein_architectures.tsv.')
     encoded=json.dumps(payload,ensure_ascii=False,allow_nan=False).replace('&','\\u0026').replace('<','\\u003c').replace('>','\\u003e').replace('\u2028','\\u2028').replace('\u2029','\\u2029')
     template=Path(__file__).with_name('network_viewer.html').read_text()
     script=Path(__file__).with_name('network_viewer.js').read_text()
@@ -58,7 +65,7 @@ def domain_communities(graph):
     graph.graph['community_method']='Louvain; Jaccard edge weights; resolution=1; seed=17; complete exported graph'
 
 
-def domain_network(graph, folder, args, stem='domain_network', title='Domain co-occurrence'):
+def domain_network(graph, folder, args, stem='domain_network', title='Domain co-occurrence', members=None):
     domain_communities(graph)
     f,w=writer(folder/(stem+'_communities.tsv'),['accession','name','community','proteins_with_domain','domain_copies'])
     for accession, data in sorted(graph.nodes(data=True)):
@@ -81,10 +88,17 @@ def domain_network(graph, folder, args, stem='domain_network', title='Domain co-
                               domain_a_name=graph.nodes[a]['name'],domain_b_name=graph.nodes[b]['name']))
             if len(edges)>=args.network_max_edges: break
     if args.network_max_edges==0:edges=[]
+    links=[('Domain names and communities',stem+'_communities.tsv'),('GraphML',stem+'.graphml')]
+    if members and members.available:
+        links.append(('Complete protein architectures',os.path.relpath(members.source,folder)))
+    clustering=getattr(args,'clustering',None)
+    if clustering:
+        links.append(('Protein identity / MCL network',os.path.relpath(Path(clustering)/'protein_network.html',folder)))
+    carriers=members.payload(graph,chosen,getattr(args,'network_max_proteins',20000),edges=edges) if members else None
     return write_html(folder/(stem+'.html'),nodes,edges,title,'domains',
                       'An edge means two different domains occur within the same protein. Repeats count once per protein. Node color: weighted Louvain community on the complete exported co-occurrence graph; not a physical interaction or an EET activity call.',
                       len(graph),graph.number_of_edges(),'Most prevalent domains; strongest shared-protein edges. Community assignments use the complete exported graph.',
-                      [('Domain names and communities',stem+'_communities.tsv'),('GraphML',stem+'.graphml')])
+                      links,members=carriers)
 
 
 def protein_network(db, out, args, profiles=None):
@@ -130,9 +144,14 @@ def protein_network(db, out, args, profiles=None):
     total_edges=db.execute('SELECT COUNT(*) FROM edges').fetchone()[0]
     selection='Largest MCL clusters first; round-robin sampling of input-order members; strongest eligible edges. Filters change the view, not MCL membership.'
     if wanted: selection=f'Focused on {wanted}. '+selection
+    links=[('Full membership','membership.tsv'),('Cluster summary','cluster_summary.tsv')]
+    if profiles:
+        domain_html=Path(profiles)/'all_domains_network.html'
+        if not domain_html.exists():domain_html=Path(profiles)/'domain_network.html'
+        links.append(('Domain co-occurrence network',os.path.relpath(domain_html,out)))
     summary=write_html(out/'protein_network.html',nodes,edges,'Protein amino-acid similarity and MCL clusters','proteins',
                        'Nodes are proteins; color is the existing MCL cluster. Edge identity is DIAMOND pairwise amino-acid identity for the HSP selected by the MCL graph weight. This is not genome-wide average amino-acid identity (AAI).',
-                       total_nodes,total_edges,selection,[('Full membership','membership.tsv'),('Cluster summary','cluster_summary.tsv')])
+                       total_nodes,total_edges,selection,links)
     f,w=writer(out/'protein_network_nodes.tsv',['id','protein_id','original_header','length_aa','cluster','domain_names','architecture_names']);w.writerows(nodes);f.close()
     f,w=writer(out/'protein_network_edges.tsv',['source','target','identity_percent','coverage_a','coverage_b','evalue','bitscore','weight']);w.writerows(edges);f.close()
     (out/'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Protein clusters</title><h1>Protein clusters</h1><p><a href="protein_network.html">Interactive amino-acid similarity network</a></p><p><a href="membership.tsv">All protein memberships</a> | <a href="cluster_summary.tsv">All cluster sizes</a></p>')

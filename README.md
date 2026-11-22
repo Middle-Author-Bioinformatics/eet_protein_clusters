@@ -21,7 +21,8 @@ classification is made. These scripts also work for other preselected protein se
 
 **Interactive HTML networks:** [NETWORKS.md](NETWORKS.md) covers protein identity/MCL
 views and named-domain co-occurrence communities, including regenerating existing
-results without searches.
+results without searches, clickable Pfam entries, and searchable/downloadable
+protein lists for each domain or co-occurring domain pair.
 
 ## 1. Install on TheBelly / Linux
 

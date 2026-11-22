@@ -15,11 +15,15 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         pytest.skip('Set EET_BROWSER_EXECUTABLE to enable actual browser tests')
     pw=pytest.importorskip('playwright.sync_api')
     target=tmp_path/'network.html'
-    nodes=[dict(id='A',label='SLH (PF00395)',name='S-layer homology',group='community_1',size=10,proteins_with_domain=3),
-           dict(id='B',label='Heme binding (PF_TEST)',name='Heme binding',group='community_1',size=10),
-           dict(id='C',label='Isolated domain (PF_ISO)',name='Isolated domain',group='community_2',size=8)]
+    nodes=[dict(id='A',accession='PF00395.29',label='SLH (PF00395)',name='S-layer homology',group='community_1',size=10,proteins_with_domain=3),
+           dict(id='B',label='Heme binding (PF_TEST)',name='Heme binding',group='community_1',size=10,proteins_with_domain=2),
+           dict(id='C',label='Isolated domain (PF_ISO)',name='Isolated domain',group='community_2',size=8,proteins_with_domain=0)]
     edge=dict(source='A',target='B',value=.4,jaccard=.4,lift=2,proteins_with_both=2)
-    write_html(target,nodes,[edge],'Domain network','domains','Same-protein co-occurrence')
+    members=dict(available=True,matching_proteins=3,embedded_count=3,truncated=False,
+                 proteins=[dict(protein_id='pair1',cluster='c1',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
+                           dict(protein_id='pair2',cluster='c2',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
+                           dict(protein_id='SLH_only',cluster='c1',domain_names='SLH',architecture_names='SLH')],by_domain=dict(A=[0,1,2],B=[0,1],C=[]))
+    write_html(target,nodes,[edge],'Domain network','domains','Same-protein co-occurrence',members=members)
     with pw.sync_playwright() as p:
         browser=p.chromium.launch(executable_path=executable,headless=True,args=['--no-sandbox'])
         context=browser.new_context(viewport={'width':1440,'height':1000},offline=True,accept_downloads=True)
@@ -38,6 +42,22 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         page.locator('#reset').click();page.locator('#node-list button').first.click()
         assert 'SLH (PF00395)' in page.locator('#details').inner_text()
         assert 'Shared proteins: 2' in page.locator('#neighbors').inner_text()
+        assert page.locator('#pfam-link').get_attribute('href')=='https://www.ebi.ac.uk/interpro/entry/pfam/PF00395/'
+        assert page.locator('#pfam-link').get_attribute('rel')=='noopener noreferrer'
+        assert '3 / 3' in page.locator('#member-status').inner_text()
+        page.locator('.shared-proteins').click()
+        assert '2 / 2' in page.locator('#member-status').inner_text()
+        assert 'SLH_only' not in page.locator('#member-list').inner_text()
+        page.locator('#member-search').fill('pair2')
+        assert page.locator('#member-list li').count()==1
+        with page.expect_download() as carriers:page.locator('#download-members').click()
+        exported_carriers=Path(carriers.value.path()).read_text()
+        assert 'pair1' in exported_carriers and 'pair2' in exported_carriers and 'SLH_only' not in exported_carriers
+        page.evaluate('networkView.selectNode("B")');assert page.locator('#pfam-link').count()==0
+        page.evaluate('networkView.data.members.available=false;networkView.selectNode("A")')
+        assert 'unavailable' in page.locator('#member-status').inner_text() and page.locator('#download-members').is_hidden()
+        page.evaluate('networkView.data.members.available=true;networkView.data.members.by_domain.A=[0];networkView.selectNode("A")')
+        assert 'Partial list' in page.locator('#member-status').inner_text()
         bbox=page.locator('#network').bounding_box()
         before=page.evaluate('networkView.getCamera().scale');page.mouse.move(bbox['x']+bbox['width']/2,bbox['y']+bbox['height']/2);page.mouse.wheel(0,-100)
         page.wait_for_function('(previous)=>networkView.getCamera().scale>previous',arg=before)
@@ -51,6 +71,8 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         with page.expect_download() as png:page.locator('#download-image').click()
         assert Path(png.value.path()).read_bytes().startswith(b'\x89PNG')
         if os.environ.get('NETWORK_TEST_ARTIFACTS'):
+            page.evaluate('networkView.data.members.by_domain.A=[0,1,2];networkView.selectNode("A")')
+            page.locator('.shared-proteins').click()
             folder=Path(os.environ['NETWORK_TEST_ARTIFACTS']);folder.mkdir(parents=True,exist_ok=True);page.screenshot(path=folder/'domain-network.png',full_page=True)
         with page.expect_download() as tab:page.locator('#download-table').click()
         assert 'SLH (PF00395)' in Path(tab.value.path()).read_text()
