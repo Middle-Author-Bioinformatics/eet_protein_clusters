@@ -16,8 +16,8 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
     pw=pytest.importorskip('playwright.sync_api')
     target=tmp_path/'network.html'
     nodes=[dict(id='A',accession='PF00395.29',label='SLH (PF00395)',name='S-layer homology',group='community_1',size=10,proteins_with_domain=3),
-           dict(id='B',label='Heme binding (PF_TEST)',name='Heme binding',group='community_1',size=10),
-           dict(id='C',label='Isolated domain (PF_ISO)',name='Isolated domain',group='community_2',size=8)]
+           dict(id='B',label='Heme binding (PF_TEST)',name='Heme binding',group='community_1',size=10,proteins_with_domain=2),
+           dict(id='C',label='Isolated domain (PF_ISO)',name='Isolated domain',group='community_2',size=8,proteins_with_domain=0)]
     edge=dict(source='A',target='B',value=.4,jaccard=.4,lift=2,proteins_with_both=2)
     members=dict(available=True,matching_proteins=3,embedded_count=3,truncated=False,
                  proteins=[dict(protein_id='pair1',cluster='c1',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
@@ -71,6 +71,8 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         with page.expect_download() as png:page.locator('#download-image').click()
         assert Path(png.value.path()).read_bytes().startswith(b'\x89PNG')
         if os.environ.get('NETWORK_TEST_ARTIFACTS'):
+            page.evaluate('networkView.data.members.by_domain.A=[0,1,2];networkView.selectNode("A")')
+            page.locator('.shared-proteins').click()
             folder=Path(os.environ['NETWORK_TEST_ARTIFACTS']);folder.mkdir(parents=True,exist_ok=True);page.screenshot(path=folder/'domain-network.png',full_page=True)
         with page.expect_download() as tab:page.locator('#download-table').click()
         assert 'SLH (PF00395)' in Path(tab.value.path()).read_text()

@@ -94,7 +94,7 @@ def domain_network(graph, folder, args, stem='domain_network', title='Domain co-
     clustering=getattr(args,'clustering',None)
     if clustering:
         links.append(('Protein identity / MCL network',os.path.relpath(Path(clustering)/'protein_network.html',folder)))
-    carriers=members.payload(graph,chosen,getattr(args,'network_max_proteins',20000)) if members else None
+    carriers=members.payload(graph,chosen,getattr(args,'network_max_proteins',20000),edges=edges) if members else None
     return write_html(folder/(stem+'.html'),nodes,edges,title,'domains',
                       'An edge means two different domains occur within the same protein. Repeats count once per protein. Node color: weighted Louvain community on the complete exported co-occurrence graph; not a physical interaction or an EET activity call.',
                       len(graph),graph.number_of_edges(),'Most prevalent domains; strongest shared-protein edges. Community assignments use the complete exported graph.',

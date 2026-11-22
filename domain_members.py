@@ -52,9 +52,10 @@ class DomainMembers:
         finally:
             Path(name).unlink(missing_ok=True)
 
-    def payload(self, graph, chosen, limit):
+    def payload(self, graph, chosen, limit, edges=None):
         if not self.available:
             return dict(available=False, reason=self.reason)
+        chosen = sorted(chosen)
         scope = graph.graph.get('cluster') if self.has_clusters and graph.graph.get('input_mode') != 'proteins' else None
         with sqlite3.connect(self.path) as db:
             db.execute('CREATE TEMP TABLE selected(accession TEXT PRIMARY KEY)')
@@ -74,7 +75,8 @@ class DomainMembers:
             for a, i in db.execute('SELECT c.accession,i.i FROM carriers c JOIN selected s USING(accession) JOIN included i USING(n) ORDER BY i.i'):
                 by_domain[a].append(i)
             # Also check full pair counts; marginal counts alone can conceal mismatched inputs.
-            for a, b, d in graph.edges(data=True):
+            pairs = graph.edges(data=True) if edges is None else ((e['source'], e['target'], e) for e in edges)
+            for a, b, d in pairs:
                 if a not in by_domain or b not in by_domain:
                     continue
                 count = db.execute('SELECT COUNT(*) FROM carriers a JOIN carriers b USING(n) JOIN proteins p USING(n) WHERE a.accession=? AND b.accession=?' + scope_sql, (a, b) + params).fetchone()[0]

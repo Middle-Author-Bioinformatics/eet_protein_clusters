@@ -268,6 +268,10 @@ GraphML remain available independently of display limits.
 
 ## Pfam links and carrier proteins (version 1.4.1)
 
+Local validation passed **66 tests**, with the actual-browser test skipped because
+of the local Chromium launch limitation described above. CI passed **all 67 tests**
+on Python 3.11 and 3.12, including the actual offline browser interactions.
+
 Tests check carrier identities against selected same-protein domain sets, repeated
 domains, pooled/per-cluster scope, native single-FASTA outputs, domain-negative
 proteins, full pair exports, embedding caps including zero, cache invalidation,
