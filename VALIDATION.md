@@ -244,7 +244,8 @@ limits, HTML/JSON escaping, and checksum-verified reconstruction of old graphs
 without rerunning DIAMOND. `--no-interactive` cleanup is checked while reusing
 cached HMM searches.
 
-The actual-browser test is configured in CI on both Python versions. It opens the
+CI passed all **60 tests**, including the actual-browser test, on Python 3.11
+and 3.12. The browser test is configured in CI on both Python versions. It opens the
 self-contained HTML offline in Chromium, tests domain-name/accession search,
 neighbor expansion, group and edge-threshold filters, hide-isolated, reset,
 selection/details, zoom, canvas dragging, JSON download and PNG export, and checks

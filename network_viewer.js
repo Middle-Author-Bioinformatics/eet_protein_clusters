@@ -6,7 +6,7 @@ const byId=new Map(data.nodes.map(n=>[n.id,n])),adj=new Map(data.nodes.map(n=>[n
 for(const e of data.edges){adj.get(e.source)?.add(e.target);adj.get(e.target)?.add(e.source);}
 let visibleNodes=[],visibleEdges=[],selected=null,camera={x:0,y:0,scale:1},width=1,height=1,drag=null,relaxing=false;
 const hash=s=>[...String(s)].reduce((h,c)=>(Math.imul(h,31)+c.charCodeAt(0))|0,17)>>>0;
-const color=g=>`hsl(${hash(g)%360} 48% 44%)`;
+const color=g=>{const suffix=String(g).match(/(\d+)$/),hue=suffix?(Number(suffix[1])%1000000*137.507764+195)%360:hash(g)%360;return `hsl(${hue} 48% 44%)`;};
 const groupCounts=new Map();for(const n of data.nodes)groupCounts.set(n.group,(groupCounts.get(n.group)||0)+1);
 for(const g of [...groupCounts.keys()].sort()){const o=document.createElement('option');o.value=g;o.textContent=`${g} (${groupCounts.get(g)})`;el('group').append(o);}
 el('threshold-label').textContent=isDomain?'Minimum Jaccard':'Minimum identity (%)';el('threshold').max=isDomain?'1':'100';el('threshold').step=isDomain?'0.01':'1';el('pair-label').hidden=!isDomain;
@@ -19,11 +19,11 @@ function fit(){
 }
 function draw(){
  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);ctx.fillStyle='white';ctx.fillRect(0,0,width,height);
- const neighbors=selected?adj.get(selected)||new Set():null;
+ const neighbors=selected?adj.get(selected)||new Set():null,labelBoxes=[];
  for(const e of visibleEdges){const a=screen(byId.get(e.source)),b=screen(byId.get(e.target));ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineWidth=.4+Math.min(2.5,(isDomain?e.value:e.value/100)*2.2);ctx.strokeStyle=selected?(e.source===selected||e.target===selected?'#227c85':'#dfe9e960'):'#8aa5ad70';ctx.stroke();}
  for(const n of visibleNodes){const p=screen(n),r=Math.max(3,Math.min(22,(n.size||6)*Math.sqrt(camera.scale)));ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fillStyle=color(n.group);ctx.globalAlpha=selected&&n.id!==selected&&!neighbors.has(n.id)?.28:1;ctx.fill();ctx.globalAlpha=1;
  if(n.id===selected){ctx.strokeStyle='#132f3a';ctx.lineWidth=3;ctx.stroke();}
- if(el('labels').checked&&(visibleNodes.length<=160||n.id===selected||(el('search').value&&n._matches))){ctx.font=n.id===selected?'bold 12px system-ui':'11px system-ui';ctx.fillStyle='#203e48';ctx.fillText(n.label,p.x+r+3,p.y+4);}
+ if(el('labels').checked&&(visibleNodes.length<=160||n.id===selected||(el('search').value&&n._matches))){ctx.font=n.id===selected?'bold 12px system-ui':'11px system-ui';const box={x:p.x+r+3,y:p.y-9,w:ctx.measureText(n.label).width,h:14};const collision=labelBoxes.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y);if(!collision||n.id===selected||(el('search').value&&n._matches)){ctx.fillStyle='#203e48';ctx.fillText(n.label,box.x,p.y+4);labelBoxes.push(box);}}
  }
 }
 function selectedDetails(){
@@ -65,6 +65,7 @@ function download(content,name,type){const a=document.createElement('a'),url=URL
 for(const id of ['search','group','threshold','pair','include-neighbors','hide-isolated'])el(id).addEventListener('input',()=>update(true));el('labels').addEventListener('change',draw);el('fit').onclick=fit;el('relax').onclick=relax;
 el('reset').onclick=()=>{relaxing=false;selected=null;el('relax').textContent='Relax layout';el('search').value='';el('group').value='';el('threshold').value='0';el('pair').value='1';el('include-neighbors').checked=true;el('hide-isolated').checked=false;el('labels').checked=true;update(true);};
 el('download-data').onclick=()=>download(JSON.stringify({definition:data.definition,nodes:visibleNodes,edges:visibleEdges},null,2),'visible_network.json','application/json');
+el('download-table').onclick=()=>{const keys=[...new Set(visibleNodes.flatMap(n=>Object.keys(n)))].filter(k=>!['x','y','_matches','size'].includes(k));const cell=v=>String(v??'').replace(/[\t\r\n]/g,' ');download([keys.join('\t'),...visibleNodes.map(n=>keys.map(k=>cell(n[k])).join('\t'))].join('\n'),'visible_nodes.tsv','text/tab-separated-values');};
 el('download-image').onclick=()=>{draw();const a=document.createElement('a');a.href=canvas.toDataURL('image/png');a.download='network.png';a.click();};
 new ResizeObserver(()=>{width=plot.clientWidth;height=plot.clientHeight;canvas.width=width*devicePixelRatio;canvas.height=height*devicePixelRatio;fit();}).observe(plot);
 window.networkView={data,getVisible:()=>({nodes:visibleNodes,edges:visibleEdges}),selectNode,fit,getCamera:()=>({...camera})};update();

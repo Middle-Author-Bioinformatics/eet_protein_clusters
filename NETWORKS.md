@@ -132,7 +132,7 @@ annotations. Filter by MCL cluster/domain community; optionally include matching
 nodes' neighbors, hide isolates, filter identity/Jaccard or require more shared
 proteins. Click nodes for details and visible neighbors. Drag nodes, pan on blank
 canvas, scroll to zoom, fit/reset the view, optionally relax the layout, download
-visible graph JSON or export a PNG.
+visible graph JSON, a named node TSV, or export a PNG.
 
 HTML previews default to **1,000 nodes and 5,000 edges** per network. Every file
 states embedded vs complete counts and its selection method. Protein previews

@@ -26,6 +26,8 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
         page.goto(target.as_uri());page.wait_for_function('window.networkView && document.querySelector("canvas").width>1')
         assert page.evaluate('networkView.getVisible().nodes.length')==3
+        colors=page.locator('#legend .swatch').evaluate_all('(nodes)=>nodes.map(n=>getComputedStyle(n).backgroundColor)')
+        assert len(set(colors))==2
         page.locator('#search').fill('PF00395');page.locator('#include-neighbors').uncheck()
         assert page.evaluate('networkView.getVisible().nodes.length')==1
         page.locator('#include-neighbors').check();assert page.evaluate('networkView.getVisible().nodes.length')==2
@@ -50,4 +52,6 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         assert Path(png.value.path()).read_bytes().startswith(b'\x89PNG')
         if os.environ.get('NETWORK_TEST_ARTIFACTS'):
             folder=Path(os.environ['NETWORK_TEST_ARTIFACTS']);folder.mkdir(parents=True,exist_ok=True);page.screenshot(path=folder/'domain-network.png',full_page=True)
+        with page.expect_download() as tab:page.locator('#download-table').click()
+        assert 'SLH (PF00395)' in Path(tab.value.path()).read_text()
         assert not errors;browser.close()
