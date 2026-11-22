@@ -20,7 +20,7 @@ python /home/ark/MAB/bin/eet_protein_clusters/network_reports.py \
 ```
 
 Either folder is optional. This reads the stored protein graph, membership,
-domain GraphML and model-name inventory; it does not run DIAMOND, MCL or an HMM
+domain GraphML, `protein_architectures.tsv` and model-name inventory; it does not run DIAMOND, MCL or an HMM
 search. For older protein outputs that stored only edge weights, it reconstructs
 identity/coverage metadata from checksum-verified saved DIAMOND hits, retaining
 MCL membership. If those files/checksums are missing, it reports the needed input
@@ -51,7 +51,7 @@ python cluster_proteins.py \
 
 python cluster_domains.py \
   --input MCL2/clusters --hmm /path/to/Pfam-A.hmm \
-  --output domain_results --threads 32 --resume
+  --output domain_results --threads 32 --resume --clustering MCL2
 
 # Add domain names to the protein network's node details:
 python network_reports.py --clustering MCL2 --domains domain_results
@@ -65,6 +65,10 @@ gets a native collection-wide interactive domain network.
 ## Protein amino-acid similarity network
 
 Open `MCL2/protein_network.html` (also linked from `MCL2/index.html`).
+When both folders are supplied to `network_reports.py`, the protein and domain
+views link to each other. The genome wrapper adds these links automatically.
+For a new domain search, `cluster_domains.py --clustering MCL2` adds the return
+link; this option does not rerun clustering or compute identity from domains.
 
 - Each node is a protein; node color is its existing MCL cluster. Isolated proteins
   are retained when included in the preview.
@@ -101,6 +105,50 @@ Names come from the supplied HMM model inventory. They are preserved for Pfam
 and custom HMMs; unknown/DUF model names are not replaced with guessed functions.
 Domain nodes retain counts, repeated-domain copies and prevalence. Edge details
 include names of both domains, shared-protein count, Jaccard similarity and lift.
+Click a Pfam node and use **Read about [name]** in its details to open that
+family's InterPro/Pfam entry. Model versions are retained in the analysis but
+removed from the page URL. Custom HMM accessions do not receive invented links.
+
+### Which proteins carry these domains?
+
+Click a domain node to list its carrier proteins, with IDs, MCL cluster (when
+available), and named architectures. Under a connection, click **Show shared
+proteins** to list proteins containing **both** domains. Search this list or
+download its embedded matches as TSV. The screen renders the first 100 search
+matches; the TSV includes all embedded matches for the selected node/pair,
+regardless of the carrier-list search. Repeated copies do not duplicate IDs.
+Lists reflect the graph's protein collection/cluster, independently of the
+currently visible community or Jaccard filters.
+
+Carrier identities come from the selected `domain_set` column in the original
+`protein_architectures.tsv`, not from aggregate edge counts. GraphML by itself
+cannot reconstruct protein IDs: those views explicitly label protein lists as
+unavailable. Missing or inconsistent architecture counts also produce an
+unavailable message. Old architecture tables without domain-name columns remain
+usable, with accessions as the fallback. A checksum-keyed SQLite lookup in
+`work/network_members.sqlite` is rebuilt automatically when architectures change.
+
+The offline HTML embeds at most **20,000 unique domain-carrying proteins** by
+default, selected in protein-ID order among carriers of embedded domains.
+`--network-max-proteins` changes this cap; `0` disables embedding identities.
+Each list states its embedded/full count and labels partial lists. Complete
+architectures remain downloadable from the report folder. To export every
+protein sharing a particular pair without any HTML limit or new searches:
+
+```bash
+python network_reports.py --domains /path/to/domain_results \
+  --pair PF00395 PF01476 --proteins-out SLH_LysM_proteins.tsv
+
+# Restrict to one MCL cluster (only for cluster-folder analyses):
+python network_reports.py --domains /path/to/domain_results \
+  --pair PF00395 PF01476 --cluster cluster_000123 \
+  --proteins-out cluster_000123_SLH_LysM.tsv
+```
+
+This export mode skips HTML refresh. Use exact versioned accessions if multiple
+versions match; an unversioned accession is accepted when it resolves uniquely.
+Single-FASTA results retain their native collection format, without cluster
+columns in the exported pair table.
 
 An edge means both different domains occur **inside the same protein**. Repeated
 copies contribute to copy counts, but count once per protein for co-occurrence.

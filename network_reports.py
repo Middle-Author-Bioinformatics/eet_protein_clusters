@@ -9,6 +9,7 @@ import sqlite3
 import sys
 from common import LOG, dump, sha256, base_manifest, versions
 from interactive_network import options, validate, protein_network, domain_network
+from domain_members import DomainMembers
 
 
 def refresh_proteins(folder, args, profiles=None):
@@ -46,10 +47,18 @@ def main(argv=None):
     p.add_argument('--clustering',type=Path,help='Completed cluster_proteins output folder')
     p.add_argument('--domains',type=Path,help='Completed cluster_domains output folder; also annotates protein nodes')
     p.add_argument('--cluster',dest='network_cluster',help='Focus protein preview on one MCL cluster without changing clustering')
+    p.add_argument('--pair',nargs=2,metavar=('DOMAIN_A','DOMAIN_B'),help='Export complete co-occurring protein list from saved architectures; skips HTML refresh')
+    p.add_argument('--proteins-out',type=Path,help='TSV path required with --pair; no HTML embedding limit applies')
     options(p);args=p.parse_args(argv);logging.basicConfig(level=logging.INFO,format='%(levelname)s %(message)s')
     try:
         validate(args)
         if not args.clustering and not args.domains:raise ValueError('Supply --clustering and/or --domains')
+        if args.pair or args.proteins_out:
+            if not args.pair or not args.proteins_out or not args.domains:
+                raise ValueError('--pair requires --domains and --proteins-out')
+            n=DomainMembers(args.domains).export_pair(args.pair,args.proteins_out,args.network_cluster)
+            LOG.info('Exported %d proteins with both domains: %s',n,args.proteins_out)
+            return 0
         results={};manifest=base_manifest(args);manifest.update(mode='interactive_reports_only',software=versions(['networkx']))
         if args.clustering:
             results['proteins']=refresh_proteins(args.clustering,args,args.domains)
@@ -60,9 +69,10 @@ def main(argv=None):
             pooled=args.domains/'all_domains_network.graphml'
             if pooled.exists():graphs.insert(0,pooled)
             if not graphs:raise ValueError('No saved domain GraphML files found; run cluster_domains.py --resume')
+            members=DomainMembers(args.domains) if not args.no_interactive else None
             for path in graphs:
                 graph=nx.read_graphml(path);stem=path.stem
-                domain_network(graph,path.parent,args,stem=stem,title='Domain co-occurrence: '+str(graph.graph.get('dataset',graph.graph.get('cluster','all proteins'))))
+                domain_network(graph,path.parent,args,stem=stem,title='Domain co-occurrence: '+str(graph.graph.get('dataset',graph.graph.get('cluster','all proteins'))),members=members)
                 nx.write_graphml(graph,path)
             results['domain_graphs']=len(graphs)
             LOG.info('Refreshed %d domain networks',len(graphs))

@@ -45,6 +45,12 @@ def test_protein_colors_keep_mcl_membership_and_isolates(tmp_path):
     assert [n['group'] for n in p['nodes']]==['cluster_000001','cluster_000001','cluster_000002']
     assert 'not genome-wide' in p['definition']
     assert len(read(tmp_path/'protein_network_nodes.tsv'))==3
+    profiles=tmp_path/'profiles';profiles.mkdir()
+    (profiles/'protein_architectures.tsv').write_text('protein_id\tdomain_names\tarchitecture_names\na\tSLH\tSLH@1-40\n')
+    (profiles/'domain_network.html').write_text('placeholder')
+    protein_network(db,tmp_path,opts(),profiles)
+    assert 'href="profiles/domain_network.html"' in (tmp_path/'protein_network.html').read_text()
+    assert payload(tmp_path/'protein_network.html')['nodes'][0]['domain_names']=='SLH'
     db.close()
 
 
