@@ -10,7 +10,7 @@ default**. No protein is excluded because it lacks a motif or domain.
 ```bash
 git clone https://github.com/Middle-Author-Bioinformatics/eet_protein_clusters.git
 cd eet_protein_clusters
-git switch codex/diamond-scratch-directory  # until this PR is merged
+git switch codex/interactive-networks  # until this PR is merged
 conda env create -f environment.yml
 conda activate eet-clusters
 ```
@@ -19,7 +19,7 @@ For an existing clone, fetch and switch to the PR branch instead:
 
 ```bash
 git fetch origin
-git switch codex/diamond-scratch-directory
+git switch codex/interactive-networks
 conda activate eet-clusters
 ```
 
@@ -247,6 +247,18 @@ stoichiometry, validated hematite binding, or EET evidence by themselves. The
 hematite pattern is the one implemented by FeGenie, not a universal mineral-binding
 diagnostic. FeGenie is AGPL-3.0 and MHCscan GPL-3.0; no source code or licensed
 predictor/model is copied into this repository.
+
+## Interactive networks
+
+The root report links `clustering/protein_network.html` (protein identity with MCL
+colors) and `domains/all_domains_network.html` (domain names with co-occurrence
+communities). Domain names and named architectures also appear in protein tables.
+The wrapper attaches domain names to protein nodes after domain analysis. The
+HTML files are self-contained and work offline; node/edge previews are bounded
+by `--network-max-nodes` and `--network-max-edges`. `--no-plots` still writes
+interactive HTML; `--no-interactive` disables it explicitly. See
+[NETWORKS.md](NETWORKS.md) for controls, scientific definitions and report-only
+regeneration commands. Pairwise protein identity is not genome-wide AAI.
 
 ## Outputs, resumption and scale
 

@@ -10,6 +10,7 @@ import inspect
 import json
 import logging
 import math
+from interactive_network import options as network_options, validate as validate_network, domain_network
 from pathlib import Path
 import sqlite3
 import sys
@@ -189,12 +190,12 @@ def summarize(db,out,args,input_mode='clusters'):
     import networkx as nx
     standalone=input_mode=='proteins'
     # Clear convenience exports when switching modes or disabling plots on resume.
-    for name in ['cooccurrence_edges.tsv','domain_network.graphml','domain_network.svg','domain_prevalence.svg','cluster_summary.tsv','collection_summary.tsv']:
+    for name in ['cooccurrence_edges.tsv','domain_network.graphml','domain_network.svg','domain_prevalence.svg','cluster_summary.tsv','collection_summary.tsv','domain_network.html','domain_network_communities.tsv','all_domains_network.html','all_domains_network.graphml','all_domains_network_communities.tsv']:
         (out/name).unlink(missing_ok=True)
     if (out/'clusters').exists():
         for old in (out/'clusters').iterdir():
             if old.is_dir():
-                for name in ['domain_prevalence.tsv','cooccurrence_edges.tsv','domain_network.graphml','domain_network.svg']:
+                for name in ['domain_prevalence.tsv','cooccurrence_edges.tsv','domain_network.graphml','domain_network.svg','domain_network.html','domain_network_communities.tsv']:
                     (old/name).unlink(missing_ok=True)
                 try:old.rmdir()
                 except OSError:pass
@@ -209,7 +210,7 @@ def summarize(db,out,args,input_mode='clusters'):
     with_domain=Counter()
     hit_fields=[f for f in HIT_FIELDS if not standalone or f!='cluster']
     af,aw=writer(out/'domain_hits.tsv',hit_fields+['selected','selection_reason'])
-    pf,pw=writer(out/'protein_architectures.tsv',([] if standalone else ['cluster'])+['protein_id','n_domain_hits','n_distinct_domains','architecture','domain_set'])
+    pf,pw=writer(out/'protein_architectures.tsv',([] if standalone else ['cluster'])+['protein_id','n_domain_hits','n_distinct_domains','architecture','domain_set','architecture_names','domain_names'])
     db.execute('DROP TABLE IF EXISTS architectures')
     db.execute('CREATE TABLE architectures (n INTEGER PRIMARY KEY, hits INTEGER, distinct_n INTEGER, architecture TEXT, domain_set TEXT)')
     try:
@@ -225,12 +226,15 @@ def summarize(db,out,args,input_mode='clusters'):
             db.execute('INSERT INTO architectures VALUES (?,?,?,?,?)',(n,len(kept),len(distinct),';'.join(f'{h["accession"]}@{h["start"]}-{h["end"]}' for h in kept),';'.join(distinct)))
         # Include domain-negative proteins in both the denominators and architecture table.
         for original,c,hits_n,distinct_n,arch,dset in db.execute('SELECT p.original,p.cluster,COALESCE(a.hits,0),COALESCE(a.distinct_n,0),COALESCE(a.architecture,""),COALESCE(a.domain_set,"") FROM proteins p LEFT JOIN architectures a ON p.n=a.n ORDER BY p.n'):
-            pw.writerow(dict(cluster=c,protein_id=original,n_domain_hits=hits_n,n_distinct_domains=distinct_n,architecture=arch,domain_set=dset))
+            pw.writerow(dict(cluster=c,protein_id=original,n_domain_hits=hits_n,n_distinct_domains=distinct_n,architecture=arch,domain_set=dset,
+                             architecture_names=';'.join(f'{names.get(part.rsplit("@",1)[0],part.rsplit("@",1)[0])} ({part.rsplit("@",1)[0]})@{part.rsplit("@",1)[1]}' for part in arch.split(';') if part),
+                             domain_names=';'.join(names.get(a,a) for a in dset.split(';') if a)))
     finally:af.close();pf.close()
     db.commit()
     global_counts=Counter()
     for counter in counts.values():global_counts.update(counter)
     summary_fields=['dataset','total_proteins','proteins_with_domains','proteins_without_domains','fraction_with_domains','distinct_domains','domain_copies','cooccurrence_pairs','top_domain','top_domain_fraction'] if standalone else ['cluster','n_proteins','proteins_with_domains','fraction_with_domains','distinct_domains','domain_copies','cooccurrence_pairs','top_domain','top_domain_fraction']
+    summary_fields+=['top_domain_name','domain_names']
     sf,sw=writer(out/('collection_summary.tsv' if standalone else 'cluster_summary.tsv'),summary_fields)
     prevalence_fields=['accession','name','total_proteins','proteins_with_domain','fraction_proteins','percent_proteins','domain_copies','mean_copies_per_protein','mean_copies_when_present'] if standalone else ['cluster','accession','name','cluster_proteins','proteins_with_domain','fraction_cluster_proteins','percent_cluster_proteins','domain_copies','mean_copies_per_member','mean_copies_when_present','outside_cluster_proteins','outside_proteins_with_domain','outside_prevalence','prevalence_ratio_vs_outside']
     fraction_key='fraction_proteins' if standalone else 'fraction_cluster_proteins'
@@ -261,22 +265,23 @@ def summarize(db,out,args,input_mode='clusters'):
                 df,dw=writer(folder/'domain_prevalence.tsv',prevalence_fields);dw.writerows(rows);df.close()
             lw.writerows(rows)
             if standalone:collection_rows=rows
-            edge_fields=['domain_a','domain_b','proteins_with_both',fraction_key,'jaccard','lift','p_b_given_a','p_a_given_b']
+            edge_fields=['domain_a','domain_b','domain_a_name','domain_b_name','proteins_with_both',fraction_key,'jaccard','lift','p_b_given_a','p_a_given_b']
             ef,ew=writer(folder/'cooccurrence_edges.tsv',edge_fields)
             for (a,b),k in sorted(pairs[c].items()):
                 na,nb=counts[c][a],counts[c][b]
-                row=dict(domain_a=a,domain_b=b,proteins_with_both=k,fraction_cluster_proteins=k/n,jaccard=k/(na+nb-k),
+                row=dict(domain_a=a,domain_b=b,domain_a_name=names[a],domain_b_name=names[b],proteins_with_both=k,fraction_cluster_proteins=k/n,jaccard=k/(na+nb-k),
                          lift=k*n/(na*nb),p_b_given_a=k/na,p_a_given_b=k/nb)
                 if standalone:row['fraction_proteins']=row.pop('fraction_cluster_proteins')
                 ew.writerow(row)
                 if k>=args.min_pair_count:graph.add_edge(a,b,**{key:val for key,val in row.items() if key not in ['domain_a','domain_b']})
             ef.close()
+            domain_network(graph,folder,args,title=f'{c}: domain co-occurrence')
             nx.write_graphml(graph,folder/'domain_network.graphml')
             if not args.no_plots:draw_network(graph,folder/'domain_network.svg',args.max_plot_nodes,args.max_plot_edges,c,n)
             top=max(counts[c],key=lambda a:counts[c][a]) if counts[c] else ''
             summary=dict(cluster=c,n_proteins=n,proteins_with_domains=with_domain[c],fraction_with_domains=with_domain[c]/n,
                          distinct_domains=len(counts[c]),domain_copies=sum(copies[c].values()),cooccurrence_pairs=len(pairs[c]),
-                         top_domain=top,top_domain_fraction=counts[c][top]/n if top else 0.)
+                         top_domain=top,top_domain_name=names.get(top,''),domain_names=';'.join(names[a] for a in sorted(counts[c])),top_domain_fraction=counts[c][top]/n if top else 0.)
             if standalone:
                 summary.pop('cluster');summary.pop('n_proteins')
                 summary.update(dataset=c,total_proteins=n,proteins_without_domains=n-with_domain[c])
@@ -287,13 +292,26 @@ def summarize(db,out,args,input_mode='clusters'):
         if not args.no_plots:draw_prevalence(collection_rows,out/'domain_prevalence.svg')
         render_collection_report(out,rows_for_html[0],collection_rows)
         return dict(proteins=total,proteins_with_domains=sum(with_domain.values()),proteins_without_domains=total-sum(with_domain.values()),distinct_domains=len(global_counts))
+    pooled=nx.Graph(input_mode='proteins',scope='all_cluster_proteins',total_proteins=total)
+    pooled_copies=Counter();pooled_pairs=Counter()
+    for counter in copies.values():pooled_copies.update(counter)
+    for counter in pairs.values():pooled_pairs.update(counter)
+    for a,k in global_counts.items():pooled.add_node(a,name=names[a],proteins_with_domain=k,fraction_proteins=k/total,domain_copies=pooled_copies[a])
+    for (a,b),k in pooled_pairs.items():
+        if k>=args.min_pair_count:
+            na,nb=global_counts[a],global_counts[b]
+            pooled.add_edge(a,b,proteins_with_both=k,fraction_proteins=k/total,jaccard=k/(na+nb-k),lift=k*total/(na*nb),p_b_given_a=k/na,p_a_given_b=k/nb)
+    domain_network(pooled,out,args,stem='all_domains_network',title='All proteins: domain co-occurrence')
+    nx.write_graphml(pooled,out/'all_domains_network.graphml')
     text='''<!doctype html><html lang="en"><meta charset="utf-8"><title>Protein cluster domain profiles</title><style>body{font:15px system-ui;margin:30px;color:#244}td,th{padding:8px;border:1px solid #ccd}table{border-collapse:collapse}input{padding:10px;margin:10px}a{color:#08796c}</style><h1>Protein cluster domain profiles</h1><p>Prevalence uses all cluster proteins, including proteins with no detected domains. Edges mean domains in the same protein; repeats do not multiply edges. These are descriptive associations, not evidence of physical interaction, operons or EET activity.</p><input id="q" placeholder="Search clusters"><table><thead><tr>'''
+    if not args.no_interactive:text=text.replace('<input id="q"','<p><a href="all_domains_network.html">Interactive domain network across all proteins</a></p><input id="q"')
     fields=list(rows_for_html[0]) if rows_for_html else []
     text+=''.join('<th>'+html.escape(k)+'</th>' for k in fields)+'<th>Files</th></tr></thead><tbody>'
     from urllib.parse import quote
     for row in rows_for_html:
         c=quote(row['cluster'],safe='');text+='<tr>'+''.join('<td>'+html.escape(str(row[k]))+'</td>' for k in fields)
         text+=f'<td><a href="clusters/{c}/domain_prevalence.tsv">Domains</a> | <a href="clusters/{c}/cooccurrence_edges.tsv">Edges</a> | <a href="clusters/{c}/domain_network.graphml">GraphML</a>'
+        if not args.no_interactive:text+=f' | <a href="clusters/{c}/domain_network.html">Interactive network</a>'
         if not args.no_plots:text+=f' | <a href="clusters/{c}/domain_network.svg">Network SVG</a>'
         text+='</td></tr>'
     text+='''</tbody></table><script>document.getElementById('q').addEventListener('input',e=>document.querySelectorAll('tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(e.target.value.toLowerCase())));</script></html>'''
@@ -302,6 +320,7 @@ def summarize(db,out,args,input_mode='clusters'):
 
 
 def run(args):
+    validate_network(args)
     if not all(math.isfinite(x) for x in [args.min_model_coverage,args.overlap_fraction]+([args.domain_evalue] if args.domain_evalue is not None else [])):raise ValueError('Numeric parameters must be finite')
     if args.threads<1 or args.model_batch_size<1 or not 0<=args.min_model_coverage<=1 or not 0<args.overlap_fraction<=1 or args.min_pair_count<1 or args.max_plot_nodes<1 or args.max_plot_edges<0 or (args.domain_evalue is not None and args.domain_evalue<=0):
         raise ValueError('Invalid threads/batch-size/coverage/overlap/network limits or E-value')
@@ -353,6 +372,7 @@ def run(args):
         manifest['counts']=summarize(db,args.output,args,input_mode=input_mode)
         manifest['interpretation']='Prevalence and within-protein domain co-occurrence; no statistical enrichment significance or physical interaction inferred'
         manifest['output_sha256']={p.name:sha256(p) for p in args.output.glob('*.tsv')}
+        manifest['interactive_html_sha256']={str(p.relative_to(args.output)):sha256(p) for p in args.output.rglob('*.html')}
         finish(args.output,manifest);LOG.info('Finished: %s',args.output/'index.html')
     finally:
         if db:db.close()
@@ -374,7 +394,8 @@ def main(argv=None):
     p.add_argument('--max-plot-edges',type=int,default=300,help='Plot strongest edges; GraphML/TSVs retain all qualifying edges')
     p.add_argument('--model-batch-size',type=int,default=128,help='Models per batch; bounded HMM memory')
     p.add_argument('--low-memory',action='store_true',help='Stream targets from disk instead of holding digital protein sequences in memory')
-    p.add_argument('--no-plots',action='store_true',help='Skip SVG rendering (still writes GraphML, edge tables, HTML index)')
+    network_options(p)
+    p.add_argument('--no-plots',action='store_true',help='Skip SVG rendering; interactive HTML, GraphML and tables remain available')
     p.add_argument('--resume',action='store_true',help='Reuse checksum-matching HMM searches, regenerate summaries/networks')
     p.add_argument('--force',action='store_true',help='Recompute into existing output')
     args=p.parse_args(argv);logging.basicConfig(level=logging.INFO,format='%(levelname)s %(message)s')

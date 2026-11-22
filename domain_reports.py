@@ -50,6 +50,7 @@ def render_collection_report(out,summary,domains):
         text+='<p class="muted">The number of proteins with any detected domain cannot be recovered from the supplied aggregate tables. It is unavailable in this reconstructed report.</p>'
     files=[('collection_summary.tsv','Collection summary'),('domain_prevalence.tsv','Domain prevalence'),('protein_architectures.tsv','Protein architectures'),('domain_hits.tsv','Domain hits'),('cooccurrence_edges.tsv','Co-occurrence edges'),('domain_network.graphml','GraphML'),('domain_prevalence.svg','Prevalence plot'),('domain_network.svg','Network SVG'),('manifest.json','Manifest')]
     text+='<nav>'+''.join(f'<a download href="{name}">{caption}</a>' for name,caption in files if (out/name).exists())+'</nav>'
+    if (out/'domain_network.html').exists():text+='<p><a href="domain_network.html">Open interactive domain network</a> | <a href="domain_network_communities.tsv">Domain names and communities</a></p>'
     plot=_svg(out/'domain_prevalence.svg')
     if plot:text+='<section><h2>Most prevalent domains</h2>'+plot+'</section>'
     text+='<section><h2>Domain breakdown</h2><p>Protein prevalence and copy counts are separate: a protein carrying three copies of a domain contributes one protein and three copies.</p><label for="domains-search">Find a domain </label><input id="domains-search" placeholder="Accession or domain name"><div class="scroll"><table><thead><tr><th>Domain accession</th><th>Name</th><th>Proteins</th><th>Prevalence</th><th>Copies</th><th>Copies / positive protein</th></tr></thead><tbody>'

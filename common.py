@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 
-VERSION = '1.3.2'
+VERSION = '1.4.0'
 LOG = logging.getLogger('eet-clusters')
 
 
@@ -98,7 +98,7 @@ def prepare_output(output,resume=False,force=False):
 def base_manifest(args):
     return {'version':VERSION,'started_utc':datetime.now(timezone.utc).isoformat(),
             'parameters':{k:str(v.resolve()) if isinstance(v,Path) else v for k,v in vars(args).items()},
-            'commands':[],'warnings':[], 'script_sha256':{p.name:sha256(p) for p in Path(__file__).parent.glob('*.py')}}
+            'commands':[],'warnings':[], 'viewer_source_sha256':{p.name:sha256(p) for p in Path(__file__).parent.glob('network_viewer.*')}, 'script_sha256':{p.name:sha256(p) for p in Path(__file__).parent.glob('*.py')}}
 
 
 def finish(output,manifest):

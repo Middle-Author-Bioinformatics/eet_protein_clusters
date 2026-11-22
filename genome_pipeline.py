@@ -16,6 +16,7 @@ from common import (LOG, base_manifest, command, dump, finish, mark_stage, prepa
                     sha256, signature, stage_reusable, versions, writer)
 from genome_inputs import MAP_FIELDS, discover, gram_assignments, prepare
 from localization import LOCALIZATION_FIELDS, TOOLS, collect, infer, EXTENSIONS, EXECUTABLES
+from interactive_network import options as network_options, validate as validate_network
 from predictor_setup import configure
 from protein_motifs import COUNT_FIELDS, PATTERNS, SOURCES, characterize
 
@@ -49,6 +50,7 @@ def load_config(path):
 
 
 def preflight(args, files, config):
+    validate_network(args)
     import math
     if args.hmm_metadata and not args.hmm_metadata.is_file(): raise ValueError(f'Missing HMM metadata file: {args.hmm_metadata}')
     if (args.threads < 1 or not all(math.isfinite(x) for x in [args.inflation, args.min_identity, args.min_coverage, args.evalue, args.block_size])
@@ -122,7 +124,7 @@ def assemble_annotations(output, genomes, args, config, manifest):
 
 
 def write_annotations(db, output, genomes, manifest):
-    fields = MAP_FIELDS + ['cluster'] + COUNT_FIELDS + ['n_domain_hits', 'n_distinct_domains', 'architecture', 'domain_set'] + LOCALIZATION_FIELDS
+    fields = MAP_FIELDS + ['cluster'] + COUNT_FIELDS + ['n_domain_hits', 'n_distinct_domains', 'architecture', 'domain_set', 'architecture_names', 'domain_names'] + LOCALIZATION_FIELDS
     f, w = writer(output/'protein_annotations.tsv', fields)
     m, mw = writer(output/'motif_hits.tsv', ['protein_id', 'genome', 'cluster', 'motif', 'regex', 'start', 'end', 'match'])
     counts = {g['genome']: Counter() for g in genomes}; cluster_counts = {}; preview = []; distributions = Counter()
@@ -183,6 +185,8 @@ def report(output, preview, manifest):
              ('clustering/cluster_summary.tsv', 'Cluster FASTA index'), ('clustering/membership.tsv', 'Cluster membership'),
              ('domains/index.html', 'Per-cluster domains and networks'), ('domains/domain_hits.tsv', 'Domain hits'),
              ('domains/domain_prevalence.tsv', 'Domain prevalence'), ('manifest.json', 'Run manifest')]
+    if (output/'clustering/protein_network.html').exists():links.insert(0,('clustering/protein_network.html','Interactive protein similarity network'))
+    if (output/'domains/all_domains_network.html').exists():links.insert(1,('domains/all_domains_network.html','Interactive domain co-occurrence network'))
     text += '<p>'+' | '.join(f'<a href="{p}">{label}</a>' for p, label in links)+'</p>'
     skipped = manifest['skipped_analyses']
     if skipped: text += '<h2>Unavailable analyses</h2><ul>'+''.join('<li>'+esc(f'{s["genome"]}: {s["tool"]}: {s["reason"]}')+'</li>' for s in skipped)+'</ul>'
@@ -190,7 +194,7 @@ def report(output, preview, manifest):
         rows = list(rows)
         return '<h2>'+esc(title)+'</h2><p>'+esc(label)+'</p><input placeholder="Search this table" oninput="filter(this)"><div class="scroll"><table><thead><tr>'+''.join('<th>'+esc(c)+'</th>' for c in columns)+'</tr></thead><tbody>'+''.join('<tr>'+''.join('<td>'+esc(row.get(c, ''))+'</td>' for c in columns)+'</tr>' for row in rows)+'</tbody></table></div>'
     text += table('Genomes', read_tsv(output/'genome_summary.tsv'), ['genome', 'gram', 'proteins', 'canonical_mhc_ge2', 'hematite_motif_proteins', 'signalp_assessed', 'phobius_assessed', 'localization_conflicts'], 'All input genomes')
-    text += table('Proteins', preview, ['protein_id', 'genome', 'original_id', 'cluster', 'cxxch_count', 'mhcscan_hemes', 'fegenie_heme_c_total', 'heme_b_count', 'hematite_count', 'architecture', 'signalp_prediction', 'signalp_generation', 'signalp_cleavage', 'signalp_d_score', 'phobius_signal_peptide', 'phobius_tm_count', 'localization_interpretation', 'localization_conflict'], 'Preview: first 1,000 proteins. Download protein_annotations.tsv for every protein; links above contain complete cluster/domain results.')
+    text += table('Proteins', preview, ['protein_id', 'genome', 'original_id', 'cluster', 'cxxch_count', 'mhcscan_hemes', 'fegenie_heme_c_total', 'heme_b_count', 'hematite_count', 'domain_names', 'architecture_names', 'signalp_prediction', 'signalp_generation', 'signalp_cleavage', 'signalp_d_score', 'phobius_signal_peptide', 'phobius_tm_count', 'localization_interpretation', 'localization_conflict'], 'Preview: first 1,000 proteins. Download protein_annotations.tsv for every protein; links above contain complete cluster/domain results.')
     text += '<script>function filter(i){let q=i.value.toLowerCase();i.nextElementSibling.querySelectorAll("tbody tr").forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q))}</script></html>'
     (output/'index.html').write_text(text)
 
@@ -232,16 +236,21 @@ def run(args):
             paths = [inputs/'proteins.faa', inputs/'protein_mapping.tsv', index]+[Path(g['fasta']) for g in genomes]
             mark_stage(stamp, key, paths)
         manifest['stages']['gene_extraction'] = dict(cache_reused=reused, signature=key, genomes=genomes)
-        cluster_extra=['--tmpdir',args.tmpdir] if args.tmpdir else []
+        network_extra=['--network-max-nodes',args.network_max_nodes,'--network-max-edges',args.network_max_edges]+(['--no-interactive'] if args.no_interactive else [])
+        cluster_extra=(['--tmpdir',args.tmpdir] if args.tmpdir else [])+network_extra
         child('cluster_proteins.py', ['-i', inputs/'proteins.faa', '-o', args.output/'clustering', '-t', args.threads,
               '--inflation', args.inflation, '--min-identity', args.min_identity, '--min-coverage', args.min_coverage,
               '--evalue', args.evalue, '--sensitivity', args.sensitivity, '--block-size', args.block_size]+cluster_extra, args.output/'clustering.log', args, manifest)
         domain_args = ['-i', args.output/'clustering/clusters', '-o', args.output/'domains', '--hmm', args.hmm,
                        '-t', args.threads, '--min-model-coverage', args.min_model_coverage, '--overlap-policy', args.overlap_policy]
+        domain_args+=network_extra
         if args.domain_evalue is not None: domain_args += ['--domain-evalue', args.domain_evalue]
         if args.no_plots: domain_args.append('--no-plots')
         if args.low_memory: domain_args.append('--low-memory')
         child('cluster_domains.py', domain_args, args.output/'domains.log', args, manifest)
+        if not args.no_interactive:
+            from network_reports import refresh_proteins
+            manifest['interactive_protein_network']=refresh_proteins(args.output/'clustering',args,args.output/'domains')
         dump(args.output/'manifest.inprogress.json', manifest)
         preview = assemble_annotations(args.output, genomes, args, config, manifest)
         report(args.output, preview, manifest)
@@ -274,6 +283,7 @@ def main(argv=None):
     p.add_argument('--domain-evalue', type=float, help='Explicit fallback for HMMs without GA; Pfam GA preferred')
     p.add_argument('--min-model-coverage', type=float, default=0.)
     p.add_argument('--overlap-policy', choices=['best', 'all'], default='best')
+    network_options(p)
     p.add_argument('--low-memory', action='store_true')
     p.add_argument('--no-plots', action='store_true')
     for tool in TOOLS:
