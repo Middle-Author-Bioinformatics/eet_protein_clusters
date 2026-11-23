@@ -69,6 +69,73 @@ This option imports FASTA headers. The separate LLM summarizer produces a
 `cluster_annotations.tsv`/JSONL, not renamed FASTAs; that TSV is not implicitly
 treated as a protein-header source.
 
+### Protein cluster IDs and domain highlighting
+
+Every carrier row now shows its protein cluster ID as a visible badge, beside
+the protein name/ID. It is also searchable and retained in TSV downloads. Missing
+assignments are labeled **Cluster unavailable**, rather than guessed from an ID
+or a renamed FASTA filename.
+
+In the pooled `all_domains_network.html`, use **Highlight cluster** to select a
+protein cluster. Its domains receive orange outlines; other domains fade while
+the graph remains visible. Domain-community colors, node sizes, edges and
+Jaccard/lift values retain their original meaning. The existing community filter
+is separate from this new protein-cluster selector. Reset clears both controls.
+
+The carrier list continues to include all clusters for the selected domain/pair;
+members of the highlighted cluster move to the top and their badges are accented.
+Search the list by cluster ID to narrow it. The selected-node card shows both the
+global carrier count and the count in the highlighted cluster. The toolbar states
+visible versus total domain-family counts for that cluster; filters/export caps
+can hide domains. Clusters with no detected domains remain selectable and show
+zero, and membership counts include analyzed domain-negative proteins.
+
+**Highlighting means domain presence, not within-cluster co-occurrence.** A cluster
+can contain domain A in one protein and domain B in another. Both domains will
+be highlighted, while an A–B edge in the pooled graph could come entirely from
+a different cluster. The selector does not create or reassign edges. To inspect
+within-cluster co-occurrence itself, open that cluster's own `domain_network.html`.
+
+The full saved architecture table supplies the cluster/domain presence index,
+independently of `--network-max-proteins`. Even a zero-protein HTML preview can
+highlight the correct domains. Only domains embedded in the graph can be drawn;
+the status displays the full graph's domain count to expose node truncation.
+Per-cluster HTML files restrict the selector to their own analysis scope. Complete
+cluster/domain index metadata can increase HTML size for very large collections.
+
+Cluster-folder domain analyses already carry their protein-cluster assignments.
+If you originally searched one **unclustered protein FASTA**, attach its later
+MCL assignments during report regeneration by supplying `--clustering`:
+
+```bash
+python network_reports.py \
+  --clustering /path/to/MCL2-test \
+  --domains /path/to/single_fasta_domain_results
+```
+
+This reads `MCL2-test/membership.tsv` by original protein ID and preserves the
+existing domain search, architecture table and graph statistics. You may also
+regenerate only the domain views using a saved membership file:
+
+```bash
+python network_reports.py --domains /path/to/domain_results \
+  --membership /path/to/MCL2-test/membership.tsv
+```
+
+`--membership` is for domain-only reports; with `--clustering`, its saved mapping
+is used automatically. The TSV requires `protein_id` and `cluster` columns and
+unique protein IDs. Duplicate, empty, nonmatching, or conflicting assignments
+are rejected. If the domain analysis already has cluster labels, an imported
+mapping must agree with them. Partial mappings preserve known assignments and
+record unassigned-protein counts. The report manifest records mapping provenance
+and its checksum. Complete `--pair ... --cluster ...` exports also support imported
+membership for a single-FASTA domain analysis.
+
+Without saved cluster assignments, the selector is disabled with an explanation.
+An aggregate GraphML alone cannot reconstruct protein/cluster/domain mappings;
+the original `protein_architectures.tsv` is still required. No sequence search or
+reclustering is performed by this display feature.
+
 To focus on a particular MCL family:
 
 ```bash
