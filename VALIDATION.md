@@ -305,3 +305,17 @@ match. The latter checks that coverage filtering can retain the broader hit.
 No full NR search or benchmark on TheBelly was run; its database and proteins
 are unavailable in this workspace. Database content/annotation quality and NR-scale
 runtime/space requirements are therefore not established by these tests.
+
+## LLM annotation synthesis
+
+`tests/test_llm_summaries.py` uses mocked HTTP responses: no live OpenAI requests,
+API credentials or paid model evaluations are used. It tests header parsing,
+species-bracket grouping, copied-hit counts, unknown/empty clusters, bounded
+evidence with explicit omissions, dry-run behavior, manual/environment key input
+without saved secrets, response parsing, evidence-reference validation, incomplete
+responses/refusals, retry/authentication behavior, cache invalidation, partial
+failures, and joining NR quality metrics to matching FASTA records. A standalone
+`python -S ... --help` invocation checks operation without third-party packages.
+These are software and prompt-construction checks, not evidence that the selected
+model produces biologically accurate labels. Human curation and comparison with
+annotation/domain evidence are required before treating outputs as annotations.
