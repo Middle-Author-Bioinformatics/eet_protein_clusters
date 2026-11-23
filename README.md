@@ -25,6 +25,9 @@ results without searches, clickable Pfam entries, and searchable/downloadable
 protein lists for each domain or co-occurring domain pair.
 `network_reports.py --protein-fastas /path/to/annotated_clusters` imports updated
 header descriptions into those lists while preserving IDs and the saved analysis.
+Protein lists show cluster IDs; a **Highlight cluster** selector outlines the
+domains present in a chosen protein cluster. For single-FASTA domain results,
+`--clustering` attaches the saved MCL membership during report-only regeneration.
 
 **NR annotation of cluster FASTAs:** [NR_ANNOTATION.md](NR_ANNOTATION.md) documents
 `annotate_clusters_nr.py`: one DIAMOND search of all cluster proteins followed by

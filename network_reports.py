@@ -49,6 +49,7 @@ def main(argv=None):
     p.add_argument('--clustering',type=Path,help='Completed cluster_proteins output folder')
     p.add_argument('--domains',type=Path,help='Completed cluster_domains output folder; also annotates protein nodes')
     p.add_argument('--protein-fastas',type=Path,help='FASTA folder/file supplying display annotations by unchanged first-token IDs; defaults to CLUSTERING/clusters when present')
+    p.add_argument('--membership',type=Path,help='Saved protein_id/cluster TSV for domain reports; defaults to CLUSTERING/membership.tsv')
     p.add_argument('--cluster',dest='network_cluster',help='Focus protein preview on one MCL cluster without changing clustering')
     p.add_argument('--pair',nargs=2,metavar=('DOMAIN_A','DOMAIN_B'),help='Export complete co-occurring protein list from saved architectures; skips HTML refresh')
     p.add_argument('--proteins-out',type=Path,help='TSV path required with --pair; no HTML embedding limit applies')
@@ -56,14 +57,20 @@ def main(argv=None):
     try:
         validate(args)
         if not args.clustering and not args.domains:raise ValueError('Supply --clustering and/or --domains')
+        if args.membership and (args.clustering or not args.domains):
+            raise ValueError('--membership is for domain-only reports with --domains; with --clustering its saved membership is used automatically')
         label_source=args.protein_fastas
         if label_source is None and args.clustering and (args.clustering/'clusters').is_dir():
             label_source=args.clustering/'clusters'
         labels=ProteinLabels(label_source,(args.domains or args.clustering)/'work') if label_source else None
+        membership=args.membership
+        if membership is None and args.clustering and (args.clustering/'membership.tsv').is_file():
+            membership=args.clustering/'membership.tsv'
+        if membership is not None and not membership.is_file():raise ValueError(f'Membership table not found: {membership}')
         if args.pair or args.proteins_out:
             if not args.pair or not args.proteins_out or not args.domains:
                 raise ValueError('--pair requires --domains and --proteins-out')
-            n=DomainMembers(args.domains,labels).export_pair(args.pair,args.proteins_out,args.network_cluster)
+            n=DomainMembers(args.domains,labels,membership).export_pair(args.pair,args.proteins_out,args.network_cluster)
             LOG.info('Exported %d proteins with both domains: %s',n,args.proteins_out)
             return 0
         results={};manifest=base_manifest(args);manifest.update(mode='interactive_reports_only',software=versions(['networkx']))
@@ -76,7 +83,8 @@ def main(argv=None):
             pooled=args.domains/'all_domains_network.graphml'
             if pooled.exists():graphs.insert(0,pooled)
             if not graphs:raise ValueError('No saved domain GraphML files found; run cluster_domains.py --resume')
-            members=DomainMembers(args.domains,labels) if not args.no_interactive else None
+            members=DomainMembers(args.domains,labels,membership) if not args.no_interactive else None
+            if members and members.available:manifest['domain_cluster_mapping']=members.cluster_provenance
             for path in graphs:
                 graph=nx.read_graphml(path);stem=path.stem
                 domain_network(graph,path.parent,args,stem=stem,title='Domain co-occurrence: '+str(graph.graph.get('dataset',graph.graph.get('cluster','all proteins'))),members=members)

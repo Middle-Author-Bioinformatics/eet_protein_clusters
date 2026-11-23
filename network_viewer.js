@@ -10,6 +10,23 @@ const color=g=>{const suffix=String(g).match(/(\d+)$/),hue=suffix?(Number(suffix
 const groupCounts=new Map();for(const n of data.nodes)groupCounts.set(n.group,(groupCounts.get(n.group)||0)+1);
 for(const g of [...groupCounts.keys()].sort()){const o=document.createElement('option');o.value=g;o.textContent=`${g} (${groupCounts.get(g)})`;el('group').append(o);}
 el('threshold-label').textContent=isDomain?'Minimum Jaccard':'Minimum identity (%)';el('threshold').max=isDomain?'1':'100';el('threshold').step=isDomain?'0.01':'1';el('pair-label').hidden=!isDomain;
+const clusterIndex=data.members?.cluster_index,clusterById=new Map((clusterIndex?.clusters||[]).map(c=>[c.id,c]));
+el('protein-cluster-control').hidden=!isDomain;
+el('group').options[0].textContent=isDomain?'All domain communities':'All MCL clusters';
+el('group').setAttribute('aria-label',isDomain?'Domain community':'MCL cluster');
+if(isDomain&&clusterIndex?.available&&clusterById.size){
+ for(const c of clusterById.values()){const option=document.createElement('option');option.value=c.id;option.textContent=`${c.id} (${c.proteins} proteins)`;el('protein-cluster').append(option);}
+ el('protein-cluster').title='Highlight domains present in this protein cluster. Colors and pooled co-occurrence edges stay unchanged.';
+}else{
+ el('protein-cluster').disabled=true;el('protein-cluster').options[0].textContent='Cluster IDs unavailable';
+ el('protein-cluster').title=clusterIndex?.reason||(!data.members?.available&&data.members?.reason)||'Regenerate with cluster assignments in protein_architectures.tsv, --clustering, or --membership.';
+}
+function activeCluster(){return isDomain?clusterById.get(el('protein-cluster').value):null;}
+function highlightedDomains(){return new Set(Object.keys(activeCluster()?.domains||{}));}
+function highlightStatus(){
+ const cluster=activeCluster(),status=el('cluster-status');status.hidden=!cluster;
+ if(cluster){const visible=visibleNodes.filter(n=>Object.hasOwn(cluster.domains,n.id)).length;status.textContent=`${cluster.id} · ${cluster.proteins} analyzed proteins · ${visible} / ${cluster.total_domains} domains highlighted. Domain presence only; edges stay unchanged.`;}
+}
 el('scope').textContent=`Exported ${data.nodes.length.toLocaleString()} / ${data.total_nodes.toLocaleString()} nodes and ${data.edges.length.toLocaleString()} / ${data.total_edges.toLocaleString()} edges. ${data.selection}`;
 function screen(n){return{x:n.x*camera.scale+camera.x,y:n.y*camera.scale+camera.y};}
 function fit(){
@@ -19,11 +36,12 @@ function fit(){
 }
 function draw(){
  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);ctx.fillStyle='white';ctx.fillRect(0,0,width,height);
- const neighbors=selected?adj.get(selected)||new Set():null,labelBoxes=[];
+ const neighbors=selected?adj.get(selected)||new Set():null,labelBoxes=[],cluster=activeCluster(),highlighted=highlightedDomains();
  for(const e of visibleEdges){const a=screen(byId.get(e.source)),b=screen(byId.get(e.target));ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineWidth=.4+Math.min(2.5,(isDomain?e.value:e.value/100)*2.2);ctx.strokeStyle=selected?(e.source===selected||e.target===selected?'#227c85':'#dfe9e960'):'#8aa5ad70';ctx.stroke();}
- for(const n of visibleNodes){const p=screen(n),r=Math.max(3,Math.min(22,(n.size||6)*Math.sqrt(camera.scale)));ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fillStyle=color(n.group);ctx.globalAlpha=selected&&n.id!==selected&&!neighbors.has(n.id)?.28:1;ctx.fill();ctx.globalAlpha=1;
- if(n.id===selected){ctx.strokeStyle='#132f3a';ctx.lineWidth=3;ctx.stroke();}
- if(el('labels').checked&&(visibleNodes.length<=160||n.id===selected||(el('search').value&&n._matches))){ctx.font=n.id===selected?'bold 12px system-ui':'11px system-ui';const box={x:p.x+r+3,y:p.y-9,w:ctx.measureText(n.label).width,h:14};const collision=labelBoxes.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y);if(!collision||n.id===selected||(el('search').value&&n._matches)){ctx.fillStyle='#203e48';ctx.fillText(n.label,box.x,p.y+4);labelBoxes.push(box);}}
+ for(const n of visibleNodes){const p=screen(n),r=Math.max(3,Math.min(22,(n.size||6)*Math.sqrt(camera.scale)));ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fillStyle=color(n.group);ctx.globalAlpha=(selected&&n.id!==selected&&!neighbors.has(n.id)?.28:1)*(cluster&&!highlighted.has(n.id)?.18:1);ctx.fill();ctx.globalAlpha=1;
+ if(cluster&&highlighted.has(n.id)){ctx.beginPath();ctx.arc(p.x,p.y,r+4,0,2*Math.PI);ctx.strokeStyle='#cf7b1b';ctx.lineWidth=3;ctx.stroke();}
+ if(n.id===selected){ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.strokeStyle='#132f3a';ctx.lineWidth=3;ctx.stroke();}
+ if(el('labels').checked&&(visibleNodes.length<=160||n.id===selected||(el('search').value&&n._matches))){ctx.font=n.id===selected?'bold 12px system-ui':'11px system-ui';const box={x:p.x+r+3,y:p.y-9,w:ctx.measureText(n.label).width,h:14};const collision=labelBoxes.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y);if(!collision||n.id===selected||(el('search').value&&n._matches)){ctx.globalAlpha=cluster&&!highlighted.has(n.id)&&n.id!==selected?.3:1;ctx.fillStyle='#203e48';ctx.fillText(n.label,box.x,p.y+4);labelBoxes.push(box);ctx.globalAlpha=1;}}
  }
 }
 function compactDetails(parent, entries){
@@ -57,12 +75,14 @@ function renderMembers(){
  renderMemberList();
 }
 function renderMemberList(){
- const q=el('member-search').value.trim().toLowerCase(),rows=memberRows.filter(r=>Object.values(r).some(v=>String(v).toLowerCase().includes(q)));
+ const q=el('member-search').value.trim().toLowerCase(),cluster=activeCluster(),rows=memberRows.filter(r=>Object.values(r).some(v=>String(v).toLowerCase().includes(q)));
+ if(cluster)rows.sort((a,b)=>Number(b.cluster===cluster.id)-Number(a.cluster===cluster.id)||a.protein_id.localeCompare(b.protein_id));
  const list=el('member-list');list.replaceChildren();
  for(const row of rows.slice(0,100)){
   const li=document.createElement('li'),name=document.createElement('strong');
   name.className='member-name';name.textContent=row.annotation||row.protein_id;name.title=row.annotation||row.protein_id;li.append(name);
   if(row.annotation){const id=document.createElement('p');id.className='muted member-id';id.textContent=row.protein_id;li.append(id);}
+  const badge=document.createElement('span');badge.className='cluster-badge'+(cluster&&row.cluster===cluster.id?' active-cluster':'')+(!row.cluster?' unknown-cluster':'');badge.textContent=row.cluster||'Cluster unavailable';badge.title='Protein cluster';li.append(badge);
   const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Details';details.append(summary);
   compactDetails(details,[['protein_id',row.protein_id],['cluster',row.cluster],['domains',row.domain_names],['architecture',row.architecture_names],['NR hit',row.nr_hit],['annotation source',row.annotation_status],['full header',row.annotated_header]]);
   li.append(details);list.append(li);
@@ -79,7 +99,7 @@ function selectedDetails(){
  if(match){const a=document.createElement('a');a.id='pfam-link';a.href=`https://www.ebi.ac.uk/interpro/entry/pfam/${match[1]}/`;a.target='_blank';a.rel='noopener noreferrer';a.textContent=n.label;a.title='Read this Pfam entry on InterPro';name.append(a);}else name.textContent=n.label;
  card.append(name);
  if(!isDomain&&n.annotation){const annotation=document.createElement('p');annotation.className='selection-annotation';annotation.textContent=n.annotation;card.append(annotation);}
- const count=document.createElement('p');count.className='muted';count.textContent=isDomain?`${Number(n.proteins_with_domain).toLocaleString()} proteins`:[n.length_aa?`${n.length_aa} aa`:'',n.cluster].filter(Boolean).join(' · ');card.append(count);
+ const count=document.createElement('p');count.className='muted';count.textContent=isDomain?`${Number(n.proteins_with_domain).toLocaleString()} proteins`:[n.length_aa?`${n.length_aa} aa`:'',n.cluster].filter(Boolean).join(' · ');if(isDomain&&activeCluster()){const c=activeCluster();count.textContent+=` · ${c.domains[n.id]||0} in ${c.id}`;}card.append(count);
  compactDetails(stats,Object.entries(n).filter(([k])=>!['x','y','size','_matches','label'].includes(k)));
  const attached=visibleEdges.filter(e=>e.source===selected||e.target===selected),h=document.createElement('h2');h.textContent=`Connections (${attached.length})`;panel.append(h);
  let extra=null;if(attached.length>8){extra=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`More connections (${Math.min(100,attached.length)-8})`;extra.append(summary);}
@@ -108,9 +128,9 @@ function update(autoFit=false){
  if(el('hide-isolated').checked){const connected=new Set(visibleEdges.flatMap(e=>[e.source,e.target]));visibleNodes=visibleNodes.filter(n=>connected.has(n.id));}
  if(selected&&!visibleNodes.some(n=>n.id===selected))selected=null;
  el('empty').hidden=visibleNodes.length>0;el('status').textContent=`Visible: ${visibleNodes.length.toLocaleString()} nodes, ${visibleEdges.length.toLocaleString()} edges | Embedded export: ${data.nodes.length.toLocaleString()} nodes, ${data.edges.length.toLocaleString()} edges. View filters do not rerun clustering.`;
- const list=el('node-list');list.replaceChildren();for(const n of visibleNodes.slice(0,100)){const b=document.createElement('button');b.textContent=n.label;b.dataset.nodeId=n.id;b.onclick=()=>selectNode(n.id);list.append(b);}el('list-status').textContent=`Listed ${Math.min(100,visibleNodes.length)} of ${visibleNodes.length} visible nodes; search to find others.`;
+ const list=el('node-list');list.replaceChildren();for(const n of visibleNodes.slice(0,100)){const b=document.createElement('button');b.textContent=n.label;b.dataset.nodeId=n.id;if(activeCluster())b.className=Object.hasOwn(activeCluster().domains,n.id)?'cluster-domain-match':'cluster-domain-other';b.onclick=()=>selectNode(n.id);list.append(b);}el('list-status').textContent=`Listed ${Math.min(100,visibleNodes.length)} of ${visibleNodes.length} visible nodes; search to find others.`;
  const legend=el('legend');legend.replaceChildren();for(const g of [...new Set(visibleNodes.map(n=>n.group))].sort().slice(0,40)){const s=document.createElement('span'),dot=document.createElement('i');dot.className='swatch';dot.style.background=color(g);s.append(dot,document.createTextNode(g));legend.append(s);}
- selectedDetails();if(autoFit)fit();else draw();
+ highlightStatus();selectedDetails();if(autoFit)fit();else draw();
 }
 function pick(x,y){let found=null,distance=Infinity;for(const n of visibleNodes){const p=screen(n),d=Math.hypot(x-p.x,y-p.y),r=Math.max(5,Math.min(24,(n.size||6)*Math.sqrt(camera.scale)))+4;if(d<r&&d<distance){found=n;distance=d;}}return found;}
 function coords(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
@@ -125,13 +145,13 @@ function relax(){if(relaxing){relaxing=false;return;}relaxing=true;let count=0;e
  for(const e of visibleEdges){const a=byId.get(e.source),b=byId.get(e.target),dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,k=(d-65)*.008;force.get(a.id).x+=dx/d*k;force.get(a.id).y+=dy/d*k;force.get(b.id).x-=dx/d*k;force.get(b.id).y-=dy/d*k;}
  for(const n of visibleNodes){const f=force.get(n.id);n.x+=Math.max(-6,Math.min(6,f.x));n.y+=Math.max(-6,Math.min(6,f.y));}draw();requestAnimationFrame(tick);};requestAnimationFrame(tick);}
 function download(content,name,type){const a=document.createElement('a'),url=URL.createObjectURL(new Blob([content],{type}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-for(const id of ['search','group','threshold','pair','include-neighbors','hide-isolated'])el(id).addEventListener('input',()=>update(true));el('labels').addEventListener('change',draw);el('fit').onclick=fit;el('relax').onclick=relax;
-el('reset').onclick=()=>{relaxing=false;selected=null;el('relax').textContent='Relax layout';el('search').value='';el('group').value='';el('threshold').value='0';el('pair').value='1';el('include-neighbors').checked=true;el('hide-isolated').checked=false;el('labels').checked=true;update(true);};
-el('download-data').onclick=()=>download(JSON.stringify({definition:data.definition,nodes:visibleNodes,edges:visibleEdges},null,2),'visible_network.json','application/json');
+for(const id of ['search','group','threshold','pair','include-neighbors','hide-isolated'])el(id).addEventListener('input',()=>update(true));el('protein-cluster').addEventListener('input',()=>update(false));el('labels').addEventListener('change',draw);el('fit').onclick=fit;el('relax').onclick=relax;
+el('reset').onclick=()=>{relaxing=false;selected=null;el('relax').textContent='Relax layout';el('search').value='';el('group').value='';el('protein-cluster').value='';el('threshold').value='0';el('pair').value='1';el('include-neighbors').checked=true;el('hide-isolated').checked=false;el('labels').checked=true;update(true);};
+el('download-data').onclick=()=>download(JSON.stringify({definition:data.definition,nodes:visibleNodes,edges:visibleEdges,highlighted_cluster:activeCluster()?.id||null,highlighted_domains:visibleNodes.filter(n=>highlightedDomains().has(n.id)).map(n=>n.id)},null,2),'visible_network.json','application/json');
 el('download-table').onclick=()=>{const keys=[...new Set(visibleNodes.flatMap(n=>Object.keys(n)))].filter(k=>!['x','y','_matches','size'].includes(k));const cell=v=>String(v??'').replace(/[\t\r\n]/g,' ');download([keys.join('\t'),...visibleNodes.map(n=>keys.map(k=>cell(n[k])).join('\t'))].join('\n'),'visible_nodes.tsv','text/tab-separated-values');};
 el('member-search').addEventListener('input',renderMemberList);
 el('download-members').onclick=()=>{const keys=['protein_id',...(memberRows.some(r=>r.cluster)?['cluster']:[]),'annotation','nr_hit','annotation_status','domain_names','architecture_names','annotated_header'],cell=v=>String(v??'').replace(/[\t\r\n]/g,' ');download([keys.join('\t'),...memberRows.map(r=>keys.map(k=>cell(r[k])).join('\t'))].join('\n')+'\n','domain_carrier_proteins.tsv','text/tab-separated-values');};
 el('download-image').onclick=()=>{draw();const a=document.createElement('a');a.href=canvas.toDataURL('image/png');a.download='network.png';a.click();};
 new ResizeObserver(()=>{width=plot.clientWidth;height=plot.clientHeight;canvas.width=width*devicePixelRatio;canvas.height=height*devicePixelRatio;fit();}).observe(plot);
-window.networkView={data,getVisible:()=>({nodes:visibleNodes,edges:visibleEdges}),selectNode,fit,getCamera:()=>({...camera})};update();
+window.networkView={data,getVisible:()=>({nodes:visibleNodes,edges:visibleEdges}),selectNode,fit,getHighlight:()=>({cluster:activeCluster()?.id||null,domains:[...highlightedDomains()],visible_domains:visibleNodes.filter(n=>highlightedDomains().has(n.id)).map(n=>n.id),total_domains:activeCluster()?.total_domains||0}),getCamera:()=>({...camera})};update();
 })();

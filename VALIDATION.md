@@ -331,3 +331,18 @@ is tested for hostile annotation text. Browser checks exercise annotation search
 and TSV export, collapsed statistics/protein details, and expandable connection
 lists that initially show eight entries. Actual user NR-annotated FASTAs were not
 available; annotation imports are validated with synthetic fixtures.
+
+## Cluster provenance and domain presence highlights (version 1.4.3)
+
+Tests verify complete cluster/domain counts despite zero/limited embedded
+proteins, node caps, domain-negative clusters, per-cluster scope, native
+single-FASTA membership imports, partial/missing/changed/conflicting/invalid
+assignments, exact protein-ID matching, and no-rescan report regeneration.
+An integration check uses `--clustering` to attach saved membership to a native
+domain analysis. Separate proteins carrying A and B highlight both domains but
+do not become a same-protein pair in a cluster-specific export.
+Browser checks cover visible cluster badges, selection/reset, separate community
+filters, prioritizing highlighted-cluster proteins without removing other rows,
+domain presence beyond the protein-preview cap, disabled legacy mapping controls,
+and unchanged pooled edges. These tests use synthetic data; the user's actual
+membership and architecture files were not available here.

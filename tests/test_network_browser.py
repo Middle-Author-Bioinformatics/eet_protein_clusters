@@ -22,7 +22,11 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
     members=dict(available=True,matching_proteins=3,embedded_count=3,truncated=False,
                  proteins=[dict(protein_id='pair1',annotation='Putative cytochrome c protein',nr_hit='WP_1',cluster='c1',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
                            dict(protein_id='pair2',annotation='Cell wall protein',nr_hit='WP_2',cluster='c2',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
-                           dict(protein_id='SLH_only',cluster='c1',domain_names='SLH',architecture_names='SLH')],by_domain=dict(A=[0,1,2],B=[0,1],C=[]))
+                           dict(protein_id='SLH_only',cluster='c1',domain_names='SLH',architecture_names='SLH')],by_domain=dict(A=[0,1,2],B=[0,1],C=[]),
+                 cluster_index=dict(available=True,unassigned_proteins=0,source='protein_architectures.tsv',clusters=[
+                     dict(id='c1',proteins=2,domains=dict(A=2,B=1),total_domains=2),
+                     dict(id='c2',proteins=1,domains=dict(A=1,B=1),total_domains=2),
+                     dict(id='c3',proteins=1,domains={},total_domains=0)]))
     write_html(target,nodes,[edge],'Domain network','domains','Same-protein co-occurrence',members=members)
     with pw.sync_playwright() as p:
         browser=p.chromium.launch(executable_path=executable,headless=True,args=['--no-sandbox'])
@@ -30,6 +34,17 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
         page.goto(target.as_uri());page.wait_for_function('window.networkView && document.querySelector("canvas").width>1')
         assert page.evaluate('networkView.getVisible().nodes.length')==3
+        assert page.locator('#protein-cluster option').count()==4
+        page.locator('#protein-cluster').select_option('c1')
+        assert set(page.evaluate('networkView.getHighlight().domains'))=={'A','B'}
+        assert page.evaluate('networkView.getVisible().nodes.length')==3
+        assert page.evaluate('networkView.getVisible().edges.length')==1
+        assert 'edges stay unchanged' in page.locator('#cluster-status').inner_text()
+        page.locator('#protein-cluster').select_option('c3')
+        assert page.evaluate('networkView.getHighlight().domains')==[]
+        assert '0 / 0' in page.locator('#cluster-status').inner_text()
+        page.locator('#reset').click()
+        assert page.evaluate('networkView.getHighlight().cluster') is None
         colors=page.locator('#legend .swatch').evaluate_all('(nodes)=>nodes.map(n=>getComputedStyle(n).backgroundColor)')
         assert len(set(colors))==2
         page.locator('#search').fill('PF00395');page.locator('#include-neighbors').uncheck()
@@ -47,6 +62,11 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         assert page.locator('#pfam-link').get_attribute('href')=='https://www.ebi.ac.uk/interpro/entry/pfam/PF00395/'
         assert page.locator('#pfam-link').get_attribute('rel')=='noopener noreferrer'
         assert '3 / 3' in page.locator('#member-status').inner_text()
+        assert set(page.locator('#member-list .cluster-badge').all_inner_texts())=={'c1','c2'}
+        page.locator('#protein-cluster').select_option('c2')
+        assert page.locator('#member-list li').count()==3
+        assert page.locator('#member-list li').first.locator('.member-id').inner_text()=='pair2'
+        assert '1 in c2' in page.locator('#details').inner_text()
         page.locator('.shared-proteins').click()
         assert '2 / 2' in page.locator('#member-status').inner_text()
         assert 'SLH_only' not in page.locator('#member-list').inner_text()
@@ -62,6 +82,7 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         exported_carriers=Path(carriers.value.path()).read_text()
         assert 'pair1' in exported_carriers and 'pair2' in exported_carriers and 'SLH_only' not in exported_carriers
         assert 'Putative cytochrome c protein' in exported_carriers and 'WP_2' in exported_carriers
+        assert 'c1' in exported_carriers and 'c2' in exported_carriers
         page.evaluate('networkView.selectNode("B")');assert page.locator('#pfam-link').count()==0
         page.evaluate('networkView.data.members.available=false;networkView.selectNode("A")')
         assert 'unavailable' in page.locator('#member-status').inner_text() and page.locator('#download-members').is_hidden()
@@ -81,6 +102,7 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         assert Path(png.value.path()).read_bytes().startswith(b'\x89PNG')
         if os.environ.get('NETWORK_TEST_ARTIFACTS'):
             page.evaluate('networkView.data.members.by_domain.A=[0,1,2];networkView.selectNode("A")')
+            page.locator('#protein-cluster').select_option('c2')
             page.locator('.shared-proteins').click()
             folder=Path(os.environ['NETWORK_TEST_ARTIFACTS']);folder.mkdir(parents=True,exist_ok=True);page.screenshot(path=folder/'domain-network.png',full_page=True)
         with page.expect_download() as tab:page.locator('#download-table').click()
@@ -89,7 +111,10 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         extras=[dict(id=f'N{i}',label=f'Domain {i}',name=f'Domain {i}',group='community_1',size=8,proteins_with_domain=1) for i in range(10)]
         more_edges=[dict(source='A',target=n['id'],value=.3,jaccard=.3,lift=1,proteins_with_both=1) for n in extras]
         many_members=json.loads(json.dumps(members))
-        for n in extras:many_members['by_domain'][n['id']]=[0]
+        for n in extras:
+            many_members['by_domain'][n['id']]=[0]
+            many_members['cluster_index']['clusters'][0]['domains'][n['id']]=1
+            many_members['cluster_index']['clusters'][0]['total_domains']+=1
         many=tmp_path/'many.html';write_html(many,nodes+extras,[edge]+more_edges,'Many connections','domains','Definition',members=many_members)
         page.goto(many.as_uri());page.wait_for_function('window.networkView');page.evaluate('networkView.selectNode("A")')
         assert page.locator('#neighbors .neighbor-target:visible').count()==8
@@ -97,4 +122,18 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         assert page.locator('#neighbors .neighbor-target:visible').count()==11
         page.locator('#technical-details summary').click()
         assert 'Jaccard' in page.locator('#statistics').inner_text()
+        # Domain presence remains available when no carrier identities are embedded.
+        capped=json.loads(json.dumps(members));capped.update(proteins=[],by_domain=dict(A=[]),embedded_count=0,truncated=True)
+        for c in capped['cluster_index']['clusters']:c['domains']={k:v for k,v in c['domains'].items() if k=='A'}
+        capfile=tmp_path/'capped.html';write_html(capfile,[nodes[0]],[],'Capped','domains','Definition',total_nodes=3,total_edges=1,members=capped)
+        page.goto(capfile.as_uri());page.wait_for_function('window.networkView')
+        page.locator('#protein-cluster').select_option('c2')
+        assert page.evaluate('networkView.getHighlight().visible_domains')==['A']
+        assert '1 / 2' in page.locator('#cluster-status').inner_text()
+        page.evaluate('networkView.selectNode("A")')
+        assert '0 / 3' in page.locator('#member-status').inner_text()
+        legacy=json.loads(json.dumps(members));legacy.pop('cluster_index')
+        legacyfile=tmp_path/'legacy.html';write_html(legacyfile,nodes,[edge],'Legacy','domains','Definition',members=legacy)
+        page.goto(legacyfile.as_uri());page.wait_for_function('window.networkView')
+        assert page.locator('#protein-cluster').is_disabled()
         assert not errors;browser.close()
