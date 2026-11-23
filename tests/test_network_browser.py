@@ -20,8 +20,8 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
            dict(id='C',label='Isolated domain (PF_ISO)',name='Isolated domain',group='community_2',size=8,proteins_with_domain=0)]
     edge=dict(source='A',target='B',value=.4,jaccard=.4,lift=2,proteins_with_both=2)
     members=dict(available=True,matching_proteins=3,embedded_count=3,truncated=False,
-                 proteins=[dict(protein_id='pair1',cluster='c1',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
-                           dict(protein_id='pair2',cluster='c2',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
+                 proteins=[dict(protein_id='pair1',annotation='Putative cytochrome c protein',nr_hit='WP_1',cluster='c1',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
+                           dict(protein_id='pair2',annotation='Cell wall protein',nr_hit='WP_2',cluster='c2',domain_names='SLH;Heme',architecture_names='SLH + Heme'),
                            dict(protein_id='SLH_only',cluster='c1',domain_names='SLH',architecture_names='SLH')],by_domain=dict(A=[0,1,2],B=[0,1],C=[]))
     write_html(target,nodes,[edge],'Domain network','domains','Same-protein co-occurrence',members=members)
     with pw.sync_playwright() as p:
@@ -39,20 +39,29 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         assert page.evaluate('networkView.getVisible().nodes.length')==0
         page.locator('#reset').click();page.locator('#group').select_option('community_2')
         assert page.evaluate('networkView.getVisible().nodes.length')==1
-        page.locator('#reset').click();page.locator('#node-list button').first.click()
+        page.locator('#reset').click();page.locator('#browse-nodes summary').click();page.locator('#node-list button').first.click()
         assert 'SLH (PF00395)' in page.locator('#details').inner_text()
-        assert 'Shared proteins: 2' in page.locator('#neighbors').inner_text()
+        assert '2 proteins' in page.locator('#neighbors').inner_text()
+        assert not page.locator('#technical-details').evaluate('(el)=>el.open')
+        assert 'proteins_with_domain' not in page.locator('aside').inner_text()
         assert page.locator('#pfam-link').get_attribute('href')=='https://www.ebi.ac.uk/interpro/entry/pfam/PF00395/'
         assert page.locator('#pfam-link').get_attribute('rel')=='noopener noreferrer'
         assert '3 / 3' in page.locator('#member-status').inner_text()
         page.locator('.shared-proteins').click()
         assert '2 / 2' in page.locator('#member-status').inner_text()
         assert 'SLH_only' not in page.locator('#member-list').inner_text()
+        assert 'Putative cytochrome c protein' in page.locator('#member-list').inner_text()
+        assert 'SLH + Heme' not in page.locator('#member-list').inner_text()
+        page.locator('#member-list li').first.locator('summary').click()
+        assert 'SLH + Heme' in page.locator('#member-list li').first.inner_text()
+        page.locator('#member-search').fill('Cell wall')
+        assert page.locator('#member-list li').count()==1
         page.locator('#member-search').fill('pair2')
         assert page.locator('#member-list li').count()==1
         with page.expect_download() as carriers:page.locator('#download-members').click()
         exported_carriers=Path(carriers.value.path()).read_text()
         assert 'pair1' in exported_carriers and 'pair2' in exported_carriers and 'SLH_only' not in exported_carriers
+        assert 'Putative cytochrome c protein' in exported_carriers and 'WP_2' in exported_carriers
         page.evaluate('networkView.selectNode("B")');assert page.locator('#pfam-link').count()==0
         page.evaluate('networkView.data.members.available=false;networkView.selectNode("A")')
         assert 'unavailable' in page.locator('#member-status').inner_text() and page.locator('#download-members').is_hidden()
@@ -76,4 +85,16 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
             folder=Path(os.environ['NETWORK_TEST_ARTIFACTS']);folder.mkdir(parents=True,exist_ok=True);page.screenshot(path=folder/'domain-network.png',full_page=True)
         with page.expect_download() as tab:page.locator('#download-table').click()
         assert 'SLH (PF00395)' in Path(tab.value.path()).read_text()
+        # A highly connected domain starts with a short list; the rest is expandable.
+        extras=[dict(id=f'N{i}',label=f'Domain {i}',name=f'Domain {i}',group='community_1',size=8,proteins_with_domain=1) for i in range(10)]
+        more_edges=[dict(source='A',target=n['id'],value=.3,jaccard=.3,lift=1,proteins_with_both=1) for n in extras]
+        many_members=json.loads(json.dumps(members))
+        for n in extras:many_members['by_domain'][n['id']]=[0]
+        many=tmp_path/'many.html';write_html(many,nodes+extras,[edge]+more_edges,'Many connections','domains','Definition',members=many_members)
+        page.goto(many.as_uri());page.wait_for_function('window.networkView');page.evaluate('networkView.selectNode("A")')
+        assert page.locator('#neighbors .neighbor-target:visible').count()==8
+        page.locator('#neighbors details summary').click()
+        assert page.locator('#neighbors .neighbor-target:visible').count()==11
+        page.locator('#technical-details summary').click()
+        assert 'Jaccard' in page.locator('#statistics').inner_text()
         assert not errors;browser.close()

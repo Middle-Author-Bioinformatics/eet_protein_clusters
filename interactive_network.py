@@ -101,7 +101,7 @@ def domain_network(graph, folder, args, stem='domain_network', title='Domain co-
                       links,members=carriers)
 
 
-def protein_network(db, out, args, profiles=None):
+def protein_network(db, out, args, profiles=None, labels=None):
     """Bounded HTML preview of the exact MCL input graph, retaining HSP identity."""
     wanted=getattr(args,'network_cluster',None)
     groups=defaultdict(list)
@@ -137,6 +137,7 @@ def protein_network(db, out, args, profiles=None):
     for n,internal,pid,header,length,cluster in db.execute('SELECT p.n,p.internal,p.original,p.header,p.length,m.cluster FROM proteins p JOIN membership m ON m.n=p.n WHERE p.n IN (SELECT n FROM network_selected) ORDER BY p.n'):
         nodes.append(dict(id=str(n),label=pid,protein_id=pid,original_header=header,length_aa=length,
                           group=cluster,cluster=cluster,size=6,**annotations.get(pid,{})))
+    if labels:labels.decorate(nodes)
     rows=db.execute('SELECT a,b,weight,identity_percent,coverage_a,coverage_b,evalue,bitscore FROM edges WHERE a IN (SELECT n FROM network_selected) AND b IN (SELECT n FROM network_selected) ORDER BY weight DESC,a,b LIMIT ?', (args.network_max_edges,))
     edges=[dict(source=str(a),target=str(b),weight=w,value=identity,identity_percent=identity,
                 coverage_a=ca,coverage_b=cb,evalue=ev,bitscore=bits) for a,b,w,identity,ca,cb,ev,bits in rows]
@@ -152,7 +153,11 @@ def protein_network(db, out, args, profiles=None):
     summary=write_html(out/'protein_network.html',nodes,edges,'Protein amino-acid similarity and MCL clusters','proteins',
                        'Nodes are proteins; color is the existing MCL cluster. Edge identity is DIAMOND pairwise amino-acid identity for the HSP selected by the MCL graph weight. This is not genome-wide average amino-acid identity (AAI).',
                        total_nodes,total_edges,selection,links)
-    f,w=writer(out/'protein_network_nodes.tsv',['id','protein_id','original_header','length_aa','cluster','domain_names','architecture_names']);w.writerows(nodes);f.close()
+    node_fields=['id','protein_id','original_header','length_aa','cluster','domain_names','architecture_names']
+    if labels:
+        from protein_labels import LABEL_FIELDS
+        node_fields+=LABEL_FIELDS
+    f,w=writer(out/'protein_network_nodes.tsv',node_fields);w.writerows(nodes);f.close()
     f,w=writer(out/'protein_network_edges.tsv',['source','target','identity_percent','coverage_a','coverage_b','evalue','bitscore','weight']);w.writerows(edges);f.close()
     (out/'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Protein clusters</title><h1>Protein clusters</h1><p><a href="protein_network.html">Interactive amino-acid similarity network</a></p><p><a href="membership.tsv">All protein memberships</a> | <a href="cluster_summary.tsv">All cluster sizes</a></p>')
     return summary
