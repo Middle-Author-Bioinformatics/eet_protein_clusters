@@ -29,6 +29,12 @@ protein lists for each domain or co-occurring domain pair.
 same-named FASTAs with top-hit descriptions appended to the original headers.
 The script also runs independently with Python's standard library and DIAMOND.
 
+**Draft cluster labels with an LLM:** [LLM_ANNOTATION.md](LLM_ANNOTATION.md) documents
+`summarize_clusters_llm.py`, a standalone OpenAI API script that synthesizes existing
+header annotations into one conservative label per file, with conflicts and
+limitations. It supports dry runs, optional NR alignment statistics and resumable
+requests. No amino-acid sequences are sent, and no new function is established.
+
 ## 1. Install on TheBelly / Linux
 
 After unzipping this package, enter its directory. The simplest installation is a
