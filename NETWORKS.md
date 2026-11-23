@@ -27,6 +27,48 @@ MCL membership. If those files/checksums are missing, it reports the needed inpu
 rather than inventing identity values. A report-only manifest records parameters
 and the source analysis manifest checksum.
 
+### Show annotations from updated FASTA headers
+
+Replacing FASTA files alone does **not** update an existing HTML file. The saved
+architecture table supplies domain carriers and does not contain NR descriptions.
+Use the annotated FASTAs as an explicit display-label source, then regenerate:
+
+```bash
+python network_reports.py \
+  --clustering /path/to/MCL2-test \
+  --domains /path/to/domain_results \
+  --protein-fastas /path/to/MCL2-test/clusters_nr_annotated
+```
+
+There is no need to replace the original cluster folder. If you do replace
+`MCL2-test/clusters` and supply `--clustering MCL2-test`, report-only regeneration
+automatically reads the current headers there when `--protein-fastas` is omitted.
+For domain-only regeneration, supply `--protein-fastas` explicitly.
+
+The first whitespace-delimited protein IDs must stay unchanged and globally
+unique. Descriptions appended after those IDs are imported as labels; no graph,
+domain hit, cluster membership or sequence is recomputed. Renamed FASTA filenames
+are acceptable because matching uses protein IDs. An import with no matching IDs
+fails with an actionable error. Partial imports keep unmatched proteins as IDs
+and report matched/total counts in the log and report manifest.
+
+In the shared-protein list, the primary label is the imported description, with
+the original ID underneath. Both names and IDs are searchable. NR accessions,
+full headers, domains, architectures and cluster IDs are available under each
+protein's **Details** and in TSV downloads. No-hit/missing-title headers retain
+their status and display the original ID. Plain descriptive FASTA headers are
+also supported; the annotation source is recorded.
+
+`--protein-fastas` also adds annotations to protein-identity node details, the
+node TSV and complete `--pair ... --proteins-out ...` exports. Header imports are
+checksum-keyed; paths, checksums and mapping counts are recorded in
+`network_report_manifest.json`. Editing a header refreshes the metadata cache.
+Original source/architecture tables and protein IDs are never rewritten.
+
+This option imports FASTA headers. The separate LLM summarizer produces a
+`cluster_annotations.tsv`/JSONL, not renamed FASTAs; that TSV is not implicitly
+treated as a protein-header source.
+
 To focus on a particular MCL family:
 
 ```bash
@@ -119,6 +161,15 @@ matches; the TSV includes all embedded matches for the selected node/pair,
 regardless of the carrier-list search. Repeated copies do not duplicate IDs.
 Lists reflect the graph's protein collection/cluster, independently of the
 currently visible community or Jaccard filters.
+
+The right pane starts with the domain name/Pfam link, protein count, and compact
+connection buttons. Click a connection's **N proteins** button to open its shared
+list. More than eight connections are collapsed under **More connections**. Raw
+node statistics and edge metrics remain under **More details**; architectures
+and provenance are under each carrier's **Details**. Browse-node and group lists
+are collapsed initially. Complete/partial counts remain visible, with longer
+explanations under **About this list**. JSON and TSV downloads retain the full
+embedded scientific metadata.
 
 Carrier identities come from the selected `domain_set` column in the original
 `protein_architectures.tsv`, not from aggregate edge counts. GraphML by itself

@@ -319,3 +319,15 @@ failures, and joining NR quality metrics to matching FASTA records. A standalone
 These are software and prompt-construction checks, not evidence that the selected
 model produces biologically accurate labels. Human curation and comparison with
 annotation/domain evidence are required before treating outputs as annotations.
+
+## Annotated network proteins and compact side pane (version 1.4.2)
+
+Tests check header-label parsing, NR/no-hit/missing-title states, gzip and plain
+FASTA imports, exact ID matching, duplicate/renamed ID rejection, partial imports,
+metadata-cache invalidation, annotation export, automatic use of the current
+clustering FASTAs, and report-only regeneration without an HMM rescan or changes
+to architecture tables, memberships or alignment identities. HTML JSON escaping
+is tested for hostile annotation text. Browser checks exercise annotation search
+and TSV export, collapsed statistics/protein details, and expandable connection
+lists that initially show eight entries. Actual user NR-annotated FASTAs were not
+available; annotation imports are validated with synthetic fixtures.

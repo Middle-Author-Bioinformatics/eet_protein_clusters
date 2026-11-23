@@ -10,8 +10,9 @@ from common import sha256, writer
 
 
 class DomainMembers:
-    def __init__(self, folder):
+    def __init__(self, folder, labels=None):
         self.folder = Path(folder)
+        self.labels = labels
         self.source = self.folder / 'protein_architectures.tsv'
         self.available = self.source.is_file()
         self.reason = 'Protein IDs unavailable: aggregate GraphML does not contain carriers. Supply the original protein_architectures.tsv in the domain results folder.'
@@ -27,6 +28,7 @@ class DomainMembers:
                 with sqlite3.connect(self.path) as db:
                     if db.execute('SELECT value FROM metadata WHERE key="signature"').fetchone() == (key,):
                         self.has_clusters = bool(db.execute('SELECT value FROM metadata WHERE key="has_clusters"').fetchone()[0])
+                        if self.labels:self.labels.validate_ids(self.path, 'protein_id', 'domain_architectures')
                         return
             except sqlite3.DatabaseError:
                 pass
@@ -51,6 +53,7 @@ class DomainMembers:
             os.replace(name, self.path)
         finally:
             Path(name).unlink(missing_ok=True)
+        if self.labels:self.labels.validate_ids(self.path, 'protein_id', 'domain_architectures')
 
     def payload(self, graph, chosen, limit, edges=None):
         if not self.available:
@@ -82,8 +85,10 @@ class DomainMembers:
                 count = db.execute('SELECT COUNT(*) FROM carriers a JOIN carriers b USING(n) JOIN proteins p USING(n) WHERE a.accession=? AND b.accession=?' + scope_sql, (a, b) + params).fetchone()[0]
                 if count != d['proteins_with_both']:
                     return dict(available=False, reason='Protein IDs unavailable: architecture pair counts do not match this graph. Regenerate both from the same domain analysis.')
+        proteins=[dict(protein_id=r[1], cluster=r[2], domain_names=r[3], architecture_names=r[4]) for r in rows]
+        if self.labels:self.labels.decorate(proteins)
         return dict(available=True, source_sha256=self.checksum, matching_proteins=total, embedded_count=len(rows), truncated=len(rows) < total,
-                    proteins=[dict(protein_id=r[1], cluster=r[2], domain_names=r[3], architecture_names=r[4]) for r in rows], by_domain=by_domain)
+                    proteins=proteins, by_domain=by_domain)
 
     def export_pair(self, accessions, path, cluster=None):
         if not self.available:
@@ -110,12 +115,21 @@ class DomainMembers:
                 query += ' AND p.cluster=?'
                 params += (cluster,)
             fields = ['protein_id'] + (['cluster'] if self.has_clusters else []) + ['domain_a', 'domain_b', 'domain_names', 'architecture_names']
+            if self.labels:
+                from protein_labels import LABEL_FIELDS
+                fields += LABEL_FIELDS
             f, w = writer(path, fields)
             count = 0
+            batch = []
             try:
                 for pid, group, names, arch in db.execute(query + ' ORDER BY p.protein_id', params):
-                    w.writerow(dict(protein_id=pid, cluster=group, domain_a=resolved[0], domain_b=resolved[1], domain_names=names, architecture_names=arch))
+                    batch.append(dict(protein_id=pid, cluster=group, domain_a=resolved[0], domain_b=resolved[1], domain_names=names, architecture_names=arch))
                     count += 1
+                    if len(batch) >= 500:
+                        if self.labels:self.labels.decorate(batch)
+                        w.writerows(batch);batch=[]
+                if self.labels:self.labels.decorate(batch)
+                w.writerows(batch)
             finally:
                 f.close()
             return count

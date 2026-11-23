@@ -10,11 +10,13 @@ import sys
 from common import LOG, dump, sha256, base_manifest, versions
 from interactive_network import options, validate, protein_network, domain_network
 from domain_members import DomainMembers
+from protein_labels import ProteinLabels
 
 
-def refresh_proteins(folder, args, profiles=None):
+def refresh_proteins(folder, args, profiles=None, labels=None):
     dbpath=folder/'work/proteins.sqlite'
     if not dbpath.is_file():raise ValueError(f'Missing saved protein graph: {dbpath}; rerun cluster_proteins.py --resume')
+    if labels:labels.validate_ids(dbpath, 'original', 'protein_clustering')
     with sqlite3.connect(dbpath) as db:
         fields={r[1] for r in db.execute('PRAGMA table_info(edges)')}
         if 'identity_percent' not in fields:
@@ -39,13 +41,14 @@ def refresh_proteins(folder, args, profiles=None):
         if db.execute('SELECT COUNT(*) FROM membership').fetchone()[0]!=db.execute('SELECT COUNT(*) FROM proteins').fetchone()[0]:
             raise ValueError('Saved membership is incomplete')
         db.commit()
-        return protein_network(db,folder,args,profiles)
+        return protein_network(db,folder,args,profiles,labels)
 
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--clustering',type=Path,help='Completed cluster_proteins output folder')
     p.add_argument('--domains',type=Path,help='Completed cluster_domains output folder; also annotates protein nodes')
+    p.add_argument('--protein-fastas',type=Path,help='FASTA folder/file supplying display annotations by unchanged first-token IDs; defaults to CLUSTERING/clusters when present')
     p.add_argument('--cluster',dest='network_cluster',help='Focus protein preview on one MCL cluster without changing clustering')
     p.add_argument('--pair',nargs=2,metavar=('DOMAIN_A','DOMAIN_B'),help='Export complete co-occurring protein list from saved architectures; skips HTML refresh')
     p.add_argument('--proteins-out',type=Path,help='TSV path required with --pair; no HTML embedding limit applies')
@@ -53,15 +56,19 @@ def main(argv=None):
     try:
         validate(args)
         if not args.clustering and not args.domains:raise ValueError('Supply --clustering and/or --domains')
+        label_source=args.protein_fastas
+        if label_source is None and args.clustering and (args.clustering/'clusters').is_dir():
+            label_source=args.clustering/'clusters'
+        labels=ProteinLabels(label_source,(args.domains or args.clustering)/'work') if label_source else None
         if args.pair or args.proteins_out:
             if not args.pair or not args.proteins_out or not args.domains:
                 raise ValueError('--pair requires --domains and --proteins-out')
-            n=DomainMembers(args.domains).export_pair(args.pair,args.proteins_out,args.network_cluster)
+            n=DomainMembers(args.domains,labels).export_pair(args.pair,args.proteins_out,args.network_cluster)
             LOG.info('Exported %d proteins with both domains: %s',n,args.proteins_out)
             return 0
         results={};manifest=base_manifest(args);manifest.update(mode='interactive_reports_only',software=versions(['networkx']))
         if args.clustering:
-            results['proteins']=refresh_proteins(args.clustering,args,args.domains)
+            results['proteins']=refresh_proteins(args.clustering,args,args.domains,labels)
             LOG.info('Protein network: %s',args.clustering/'protein_network.html')
         if args.domains:
             import networkx as nx
@@ -69,7 +76,7 @@ def main(argv=None):
             pooled=args.domains/'all_domains_network.graphml'
             if pooled.exists():graphs.insert(0,pooled)
             if not graphs:raise ValueError('No saved domain GraphML files found; run cluster_domains.py --resume')
-            members=DomainMembers(args.domains) if not args.no_interactive else None
+            members=DomainMembers(args.domains,labels) if not args.no_interactive else None
             for path in graphs:
                 graph=nx.read_graphml(path);stem=path.stem
                 domain_network(graph,path.parent,args,stem=stem,title='Domain co-occurrence: '+str(graph.graph.get('dataset',graph.graph.get('cluster','all proteins'))),members=members)
@@ -77,6 +84,7 @@ def main(argv=None):
             results['domain_graphs']=len(graphs)
             LOG.info('Refreshed %d domain networks',len(graphs))
         manifest['results']=results
+        if labels:manifest['protein_header_import']=labels.provenance
         for folder in [args.clustering,args.domains]:
             if folder:
                 manifest['source_manifest_sha256']=sha256(folder/'manifest.json') if (folder/'manifest.json').exists() else 'unavailable'

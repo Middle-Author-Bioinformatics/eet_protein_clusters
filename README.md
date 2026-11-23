@@ -23,6 +23,8 @@ classification is made. These scripts also work for other preselected protein se
 views and named-domain co-occurrence communities, including regenerating existing
 results without searches, clickable Pfam entries, and searchable/downloadable
 protein lists for each domain or co-occurring domain pair.
+`network_reports.py --protein-fastas /path/to/annotated_clusters` imports updated
+header descriptions into those lists while preserving IDs and the saved analysis.
 
 **NR annotation of cluster FASTAs:** [NR_ANNOTATION.md](NR_ANNOTATION.md) documents
 `annotate_clusters_nr.py`: one DIAMOND search of all cluster proteins followed by
