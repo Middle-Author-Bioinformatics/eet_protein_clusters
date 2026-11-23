@@ -10,12 +10,13 @@ const color=g=>{const suffix=String(g).match(/(\d+)$/),hue=suffix?(Number(suffix
 const groupCounts=new Map();for(const n of data.nodes)groupCounts.set(n.group,(groupCounts.get(n.group)||0)+1);
 for(const g of [...groupCounts.keys()].sort()){const o=document.createElement('option');o.value=g;o.textContent=`${g} (${groupCounts.get(g)})`;el('group').append(o);}
 el('threshold-label').textContent=isDomain?'Minimum Jaccard':'Minimum identity (%)';el('threshold').max=isDomain?'1':'100';el('threshold').step=isDomain?'0.01':'1';el('pair-label').hidden=!isDomain;
+const proteinNoun=n=>Number(n)===1?'protein':'proteins';
 const clusterIndex=data.members?.cluster_index,clusterById=new Map((clusterIndex?.clusters||[]).map(c=>[c.id,c]));
 el('protein-cluster-control').hidden=!isDomain;
 el('group').options[0].textContent=isDomain?'All domain communities':'All MCL clusters';
 el('group').setAttribute('aria-label',isDomain?'Domain community':'MCL cluster');
 if(isDomain&&clusterIndex?.available&&clusterById.size){
- for(const c of clusterById.values()){const option=document.createElement('option');option.value=c.id;option.textContent=`${c.id} (${c.proteins} proteins)`;el('protein-cluster').append(option);}
+ for(const c of clusterById.values()){const option=document.createElement('option');option.value=c.id;option.textContent=`${c.id} (${c.proteins} ${proteinNoun(c.proteins)})`;el('protein-cluster').append(option);}
  el('protein-cluster').title='Highlight domains present in this protein cluster. Colors and pooled co-occurrence edges stay unchanged.';
 }else{
  el('protein-cluster').disabled=true;el('protein-cluster').options[0].textContent='Cluster IDs unavailable';
@@ -25,7 +26,7 @@ function activeCluster(){return isDomain?clusterById.get(el('protein-cluster').v
 function highlightedDomains(){return new Set(Object.keys(activeCluster()?.domains||{}));}
 function highlightStatus(){
  const cluster=activeCluster(),status=el('cluster-status');status.hidden=!cluster;
- if(cluster){const visible=visibleNodes.filter(n=>Object.hasOwn(cluster.domains,n.id)).length;status.textContent=`${cluster.id} · ${cluster.proteins} analyzed proteins · ${visible} / ${cluster.total_domains} domains highlighted. Domain presence only; edges stay unchanged.`;}
+ if(cluster){const visible=visibleNodes.filter(n=>Object.hasOwn(cluster.domains,n.id)).length;status.textContent=`${cluster.id} · ${cluster.proteins} analyzed ${proteinNoun(cluster.proteins)} · ${visible} / ${cluster.total_domains} domains highlighted. Domain presence only; edges stay unchanged.`;}
 }
 el('scope').textContent=`Exported ${data.nodes.length.toLocaleString()} / ${data.total_nodes.toLocaleString()} nodes and ${data.edges.length.toLocaleString()} / ${data.total_edges.toLocaleString()} edges. ${data.selection}`;
 function screen(n){return{x:n.x*camera.scale+camera.x,y:n.y*camera.scale+camera.y};}
@@ -99,7 +100,7 @@ function selectedDetails(){
  if(match){const a=document.createElement('a');a.id='pfam-link';a.href=`https://www.ebi.ac.uk/interpro/entry/pfam/${match[1]}/`;a.target='_blank';a.rel='noopener noreferrer';a.textContent=n.label;a.title='Read this Pfam entry on InterPro';name.append(a);}else name.textContent=n.label;
  card.append(name);
  if(!isDomain&&n.annotation){const annotation=document.createElement('p');annotation.className='selection-annotation';annotation.textContent=n.annotation;card.append(annotation);}
- const count=document.createElement('p');count.className='muted';count.textContent=isDomain?`${Number(n.proteins_with_domain).toLocaleString()} proteins`:[n.length_aa?`${n.length_aa} aa`:'',n.cluster].filter(Boolean).join(' · ');if(isDomain&&activeCluster()){const c=activeCluster();count.textContent+=` · ${c.domains[n.id]||0} in ${c.id}`;}card.append(count);
+ const count=document.createElement('p');count.className='muted';count.textContent=isDomain?`${Number(n.proteins_with_domain).toLocaleString()} ${proteinNoun(n.proteins_with_domain)}`:[n.length_aa?`${n.length_aa} aa`:'',n.cluster].filter(Boolean).join(' · ');if(isDomain&&activeCluster()){const c=activeCluster();count.textContent+=` · ${c.domains[n.id]||0} in ${c.id}`;}card.append(count);
  compactDetails(stats,Object.entries(n).filter(([k])=>!['x','y','size','_matches','label'].includes(k)));
  const attached=visibleEdges.filter(e=>e.source===selected||e.target===selected),h=document.createElement('h2');h.textContent=`Connections (${attached.length})`;panel.append(h);
  let extra=null;if(attached.length>8){extra=document.createElement('details');const summary=document.createElement('summary');summary.textContent=`More connections (${Math.min(100,attached.length)-8})`;extra.append(summary);}
@@ -107,7 +108,7 @@ function selectedDetails(){
   const target=e.source===selected?e.target:e.source,p=document.createElement('div'),b=document.createElement('button');p.className='connection';b.className='neighbor-target';b.textContent=byId.get(target).label;b.onclick=()=>selectNode(target);p.append(b);
   const metrics=isDomain?`Jaccard: ${Number(e.jaccard).toFixed(3)}; lift: ${Number(e.lift).toFixed(2)}`:`Identity: ${e.identity_percent}%; coverage A/B: ${(100*e.coverage_a).toFixed(1)}% / ${(100*e.coverage_b).toFixed(1)}%; E-value: ${e.evalue}; weight: ${Number(e.weight).toFixed(2)}`;
   p.title=metrics;
-  if(isDomain){const shared=document.createElement('button');shared.className='shared-proteins';shared.textContent=`${e.proteins_with_both} proteins`;shared.title='Show proteins containing both domains';shared.onclick=()=>{selectedPair=e;el('member-search').value='';renderMembers();el('protein-members').scrollIntoView({block:'nearest',behavior:'smooth'});};p.append(shared);}
+  if(isDomain){const shared=document.createElement('button');shared.className='shared-proteins';shared.textContent=`${e.proteins_with_both} ${proteinNoun(e.proteins_with_both)}`;shared.title='Show proteins containing both domains';shared.onclick=()=>{selectedPair=e;el('member-search').value='';renderMembers();el('protein-members').scrollIntoView({block:'nearest',behavior:'smooth'});};p.append(shared);}
   else{const identity=document.createElement('span');identity.className='muted';identity.textContent=`${e.identity_percent}% identity`;p.append(identity);}
   (index<8?panel:extra).append(p);
   const entry=document.createElement('p');entry.textContent=`${byId.get(target).label}: ${metrics}`;stats.append(entry);
