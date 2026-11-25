@@ -21,7 +21,7 @@ HIT_FIELDS=['protein_id','internal_id','cluster','accession','model_name','pssm_
             'hit_type','start','end','model_start','model_end','model_length','bitscore','evalue',
             'model_coverage','protein_coverage','incomplete','superfamily_pssm_id',
             'specific_bitscore_cutoff','threshold','coverage_status']
-HIT_TYPES={'Specific','Non-Specific','Superfamily','Multidom'}
+HIT_TYPES={'Specific','Non-Specific','Non-specific','Superfamily','Multidom'}
 
 
 def source_database(accession):
@@ -156,7 +156,7 @@ def select_hits(hits,policy='best',overlap_fraction=.5,min_coverage=0.):
     """Avoid hierarchy and overlapping-repeat inflation; keep disjoint repeats."""
     kept=[];decisions=[]
     def overlap(a,b):return max(0,min(a['end'],b['end'])-max(a['start'],b['start'])+1)/min(a['end']-a['start']+1,b['end']-b['start']+1)
-    for hit in sorted(hits,key=lambda h:({'Specific':0,'Non-Specific':1,'Superfamily':2,'Multidom':3}[h['hit_type']],h['evalue'],-h['bitscore'],h['accession'],h['start'],h['end'])):
+    for hit in sorted(hits,key=lambda h:({'Specific':0,'Non-Specific':1,'Non-specific':1,'Superfamily':2,'Multidom':3}[h['hit_type']],h['evalue'],-h['bitscore'],h['accession'],h['start'],h['end'])):
         reason='accepted'
         if hit['hit_type']=='Multidom':reason='whole_protein_multidomain_model_not_a_domain'
         elif min_coverage and hit['model_coverage']=='':reason='model_coverage_unavailable'

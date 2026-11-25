@@ -135,19 +135,20 @@ def test_derived_superfamily_and_legacy_session_format(tmp_path):
     assert h['model_coverage']=='' and h['selected']=='False'
 
 
-def test_genuine_superfamily_fallback_and_nonspecific_domain(tmp_path):
+@pytest.mark.parametrize('nonspecific',['Non-Specific','Non-specific'])
+def test_genuine_superfamily_fallback_and_nonspecific_domain(tmp_path,nonspecific):
     argv,native,raw=args(tmp_path)
     lines=native.read_text().splitlines()
     # Generic region in another part of the sequence is retained as a generic hit.
     for i,line in enumerate(lines):
         if '\tSuperfamily\t200\t' in line:
             lines[i]=line.replace('\t1\t40\t','\t175\t200\t')
-    native.write_text('\n'.join(lines).replace('\tSpecific\t101\t','\tNon-Specific\t101\t')+'\n')
+    native.write_text('\n'.join(lines).replace('\tSpecific\t101\t','\t'+nonspecific+'\t101\t')+'\n')
     assert cdd.main(argv)==0
     hits=rows(tmp_path/'out/domain_hits.tsv')
     h=next(x for x in hits if x['hit_type']=='Superfamily')
     assert h['selected']=='True' and h['model_coverage']==''
-    assert len([x for x in hits if x['hit_type']=='Non-Specific' and x['selected']=='True'])==2
+    assert len([x for x in hits if x['hit_type']==nonspecific and x['selected']=='True'])==2
 
 
 @pytest.mark.parametrize('kind',['path','symlink'])

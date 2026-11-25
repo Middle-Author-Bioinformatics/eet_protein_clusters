@@ -104,7 +104,8 @@ The pipeline runs:
    PSSM IDs, scores, E-values, and model lengths.
 3. `rpsbproc -m rep -t doms` with the snapshot's matching metadata. NCBI's
    representative view resolves redundant model alternatives. Native Specific,
-   Non-Specific, Superfamily, Multidom, incompleteness and parent-superfamily
+   Non-specific (also the historical Non-Specific spelling), Superfamily,
+   Multidom, incompleteness and parent-superfamily
    fields are retained. Specific assignments are made by rpsbproc, with the
    corresponding model-specific bit-score cutoff recorded where supplied.
 

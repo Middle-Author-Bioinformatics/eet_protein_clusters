@@ -349,7 +349,7 @@ membership and architecture files were not available here.
 
 ## CDD domain profiling (version 1.5.0)
 
-Local full-suite validation: **133 tests passed, 1 browser test skipped**. Real
+Local full-suite validation: **134 tests passed, 1 browser test skipped**. Real
 DIAMOND 2.2.8, MCL/mcxload 22-282, PyHMMER, and the optional real CDD search test
 were enabled. The browser interactions are exercised separately by GitHub CI;
 no local Chromium execution is claimed.
@@ -371,7 +371,8 @@ selected by the representative view. A second run reused completed search output
 without rewriting its archive. These tests exposed and now cover the current
 native `SESSION ... blastp ...` format and zero-length superfamily metadata.
 
-Automated fixtures cover both native session spellings, original/internal query
+Automated fixtures cover both native session spellings, current/historical
+Non-specific hit-type capitalization, original/internal query
 mapping, invalid coordinates/lengths/accessions, incomplete or omitted query
 blocks, repeated domains versus duplicate alignments, model-specific threshold
 retention, derived superfamily IDs, generic fallback annotations, hierarchy and
