@@ -61,6 +61,11 @@ def test_offline_interactive_controls_and_downloads(tmp_path):
         assert 'proteins_with_domain' not in page.locator('aside').inner_text()
         assert page.locator('#pfam-link').get_attribute('href')=='https://www.ebi.ac.uk/interpro/entry/pfam/PF00395/'
         assert page.locator('#pfam-link').get_attribute('rel')=='noopener noreferrer'
+        page.evaluate('networkView.data.nodes[0].domain_source="CDD";networkView.data.nodes[0].cdd_pssm_id="197609";networkView.selectNode("A")')
+        assert page.locator('#cdd-link').get_attribute('href')=='https://www.ncbi.nlm.nih.gov/Structure/cdd/cddsrv.cgi?uid=197609'
+        assert page.locator('#cdd-link').get_attribute('rel')=='noopener noreferrer'
+        assert page.locator('#pfam-link').count()==0
+        page.evaluate('delete networkView.data.nodes[0].domain_source;networkView.selectNode("A")')
         assert '3 / 3' in page.locator('#member-status').inner_text()
         assert set(page.locator('#member-list .cluster-badge').all_inner_texts())=={'c1','c2'}
         page.locator('#protein-cluster').select_option('c2')

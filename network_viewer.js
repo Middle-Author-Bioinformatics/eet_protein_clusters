@@ -97,7 +97,8 @@ function selectedDetails(){
  if(!selected||!byId.has(selected)){const p=document.createElement('p');p.className='muted';p.textContent='Click a node to explore.';card.append(p);renderMembers();return;}
  const n=byId.get(selected),name=document.createElement('p');name.className='selection-name';
  const accession=String(n.accession||n.id),match=isDomain&&accession.match(/^(PF[0-9]{5})(?:\.[0-9]+)?$/);
- if(match){const a=document.createElement('a');a.id='pfam-link';a.href=`https://www.ebi.ac.uk/interpro/entry/pfam/${match[1]}/`;a.target='_blank';a.rel='noopener noreferrer';a.textContent=n.label;a.title='Read this Pfam entry on InterPro';name.append(a);}else name.textContent=n.label;
+ if(isDomain&&n.domain_source==='CDD'&&/^[0-9]+$/.test(String(n.cdd_pssm_id))){const a=document.createElement('a');a.id='cdd-link';a.href=`https://www.ncbi.nlm.nih.gov/Structure/cdd/cddsrv.cgi?uid=${n.cdd_pssm_id}`;a.target='_blank';a.rel='noopener noreferrer';a.textContent=n.label;a.title='Read this CDD model on NCBI';name.append(a);}
+ else if(match){const a=document.createElement('a');a.id='pfam-link';a.href=`https://www.ebi.ac.uk/interpro/entry/pfam/${match[1]}/`;a.target='_blank';a.rel='noopener noreferrer';a.textContent=n.label;a.title='Read this Pfam entry on InterPro';name.append(a);}else name.textContent=n.label;
  card.append(name);
  if(!isDomain&&n.annotation){const annotation=document.createElement('p');annotation.className='selection-annotation';annotation.textContent=n.annotation;card.append(annotation);}
  const count=document.createElement('p');count.className='muted';count.textContent=isDomain?`${Number(n.proteins_with_domain).toLocaleString()} ${proteinNoun(n.proteins_with_domain)}`:[n.length_aa?`${n.length_aa} aa`:'',n.cluster].filter(Boolean).join(' · ');if(isDomain&&activeCluster()){const c=activeCluster();count.textContent+=` · ${c.domains[n.id]||0} in ${c.id}`;}card.append(count);

@@ -23,6 +23,8 @@ jobs:
       - run: python network_reports.py --help
       - run: python annotate_clusters_nr.py --help
       - run: python -S summarize_clusters_llm.py --help
+      - run: python -S download_cdd.py --help
+      - run: python cluster_cdd.py --help
       - uses: actions/upload-artifact@v4
         if: always()
         with:
