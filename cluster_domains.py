@@ -186,7 +186,7 @@ def draw_network(graph,path,max_nodes,max_edges,collection,total):
     ax.axis('off');fig.tight_layout();fig.savefig(path,format='svg',bbox_inches='tight');plt.close(fig)
 
 
-def summarize(db,out,args,input_mode='clusters'):
+def summarize(db,out,args,input_mode='clusters',hit_source=None,domain_selector=None,hit_fields=None,node_metadata=None):
     import networkx as nx
     standalone=input_mode=='proteins'
     # Clear convenience exports when switching modes or disabling plots on resume.
@@ -208,15 +208,15 @@ def summarize(db,out,args,input_mode='clusters'):
     counts=defaultdict(Counter);copies=defaultdict(Counter);pairs=defaultdict(Counter)
     names={a:n for a,n in db.execute('SELECT accession,name FROM models')}
     with_domain=Counter()
-    hit_fields=[f for f in HIT_FIELDS if not standalone or f!='cluster']
+    hit_fields=[f for f in (hit_fields or HIT_FIELDS) if not standalone or f!='cluster']
     af,aw=writer(out/'domain_hits.tsv',hit_fields+['selected','selection_reason'])
     pf,pw=writer(out/'protein_architectures.tsv',([] if standalone else ['cluster'])+['protein_id','n_domain_hits','n_distinct_domains','architecture','domain_set','architecture_names','domain_names'])
     db.execute('DROP TABLE IF EXISTS architectures')
     db.execute('CREATE TABLE architectures (n INTEGER PRIMARY KEY, hits INTEGER, distinct_n INTEGER, architecture TEXT, domain_set TEXT)')
     try:
-        for n,group in itertools.groupby(hit_rows(db),key=lambda row:row[0]):
+        for n,group in itertools.groupby((hit_source or hit_rows)(db),key=lambda row:row[0]):
             hits=[h for _,h in group]
-            kept,decisions=select_domains(hits,args.overlap_policy,args.overlap_fraction,args.min_model_coverage)
+            kept,decisions=(domain_selector or select_domains)(hits,args.overlap_policy,args.overlap_fraction,args.min_model_coverage)
             aw.writerows(decisions)
             if not kept:continue
             c=kept[0]['cluster'];distinct=sorted({h['accession'] for h in kept})
@@ -248,7 +248,7 @@ def summarize(db,out,args,input_mode='clusters'):
             folder=out if standalone else out/'clusters'/c
             folder.mkdir(parents=True,exist_ok=True)
             graph_metadata=dict(dataset=c,total_proteins=n) if standalone else dict(cluster=c,cluster_proteins=n)
-            graph=nx.Graph(**graph_metadata,input_mode=input_mode,definition='Domains co-occur in the same protein; repeats count once per protein for edges')
+            graph=nx.Graph(**graph_metadata,input_mode=input_mode,domain_source=getattr(args,'domain_source','Pfam'),definition='Domains co-occur in the same protein; repeats count once per protein for edges')
             rows=[]
             for a,k in sorted(counts[c].items(),key=lambda item:(-item[1],item[0])):
                 outside_n=total-n;outside_k=global_counts[a]-k
@@ -262,7 +262,7 @@ def summarize(db,out,args,input_mode='clusters'):
                          prevalence_ratio_vs_outside=prevalence/outside_p if outside_p else ('Inf' if outside_n else 'NA'))
                 if standalone:
                     row=dict(accession=a,name=names[a],total_proteins=n,proteins_with_domain=k,fraction_proteins=prevalence,percent_proteins=100*prevalence,domain_copies=copies[c][a],mean_copies_per_protein=copies[c][a]/n,mean_copies_when_present=copies[c][a]/k)
-                rows.append(row);graph.add_node(a,**{key:row[key] for key in ['name','proteins_with_domain',fraction_key,'domain_copies']})
+                rows.append(row);graph.add_node(a,**{key:row[key] for key in ['name','proteins_with_domain',fraction_key,'domain_copies']},**(node_metadata or {}).get(a,{}))
             if not standalone:
                 df,dw=writer(folder/'domain_prevalence.tsv',prevalence_fields);dw.writerows(rows);df.close()
             lw.writerows(rows)
@@ -294,11 +294,11 @@ def summarize(db,out,args,input_mode='clusters'):
         if not args.no_plots:draw_prevalence(collection_rows,out/'domain_prevalence.svg')
         render_collection_report(out,rows_for_html[0],collection_rows)
         return dict(proteins=total,proteins_with_domains=sum(with_domain.values()),proteins_without_domains=total-sum(with_domain.values()),distinct_domains=len(global_counts))
-    pooled=nx.Graph(input_mode='proteins',scope='all_cluster_proteins',total_proteins=total)
+    pooled=nx.Graph(input_mode='proteins',scope='all_cluster_proteins',total_proteins=total,domain_source=getattr(args,'domain_source','Pfam'))
     pooled_copies=Counter();pooled_pairs=Counter()
     for counter in copies.values():pooled_copies.update(counter)
     for counter in pairs.values():pooled_pairs.update(counter)
-    for a,k in global_counts.items():pooled.add_node(a,name=names[a],proteins_with_domain=k,fraction_proteins=k/total,domain_copies=pooled_copies[a])
+    for a,k in global_counts.items():pooled.add_node(a,name=names[a],proteins_with_domain=k,fraction_proteins=k/total,domain_copies=pooled_copies[a],**(node_metadata or {}).get(a,{}))
     for (a,b),k in pooled_pairs.items():
         if k>=args.min_pair_count:
             na,nb=global_counts[a],global_counts[b]

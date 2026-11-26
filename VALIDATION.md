@@ -346,3 +346,53 @@ filters, prioritizing highlighted-cluster proteins without removing other rows,
 domain presence beyond the protein-preview cap, disabled legacy mapping controls,
 and unchanged pooled edges. These tests use synthetic data; the user's actual
 membership and architecture files were not available here.
+
+## CDD domain profiling (version 1.5.0)
+
+Local full-suite validation: **134 tests passed, 1 browser test skipped**. Real
+DIAMOND 2.2.8, MCL/mcxload 22-282, PyHMMER, and the optional real CDD search test
+were enabled. The browser interactions are exercised separately by GitHub CI;
+no local Chromium execution is claimed.
+
+The CDD adapter was run end to end with real **RPS-BLAST/BLAST formatter 2.12.0+**
+and **rpsbproc 0.5.1**, using NCBI's CDD 3.22 SMART RPS database and matching CDD
+annotation files. Positive controls used the actual CDD consensus sequences for
+**LysM (smart00257, PSSM 197609)** and **bacterial SH3 (smart00287, PSSM 214600)**.
+One artificial protein concatenated LysM-LysM-SH3b with linkers; other proteins
+contained LysM only, SH3b only, or an alanine-only negative control. The controls
+are database-consensus constructs, not characterized EET proteins.
+
+The real workflow retained all four proteins, selected five domain occurrences,
+counted the two LysM copies individually, created exactly one co-occurrence for
+the combined protein, and created no edge for separate proteins in the second
+cluster. Aligned-model coverage was 1.0 for each selected control hit. The more
+generic overlapping SH3 model remained in the raw alignment table but was not
+selected by the representative view. A second run reused completed search output
+without rewriting its archive. These tests exposed and now cover the current
+native `SESSION ... blastp ...` format and zero-length superfamily metadata.
+
+Automated fixtures cover both native session spellings, current/historical
+Non-specific hit-type capitalization, original/internal query
+mapping, invalid coordinates/lengths/accessions, incomplete or omitted query
+blocks, repeated domains versus duplicate alignments, model-specific threshold
+retention, derived superfamily IDs, generic fallback annotations, hierarchy and
+whole-protein-model exclusion, unavailable coverage, domain-negative denominators,
+per-cluster versus pooled counts, native single-FASTA outputs, saved membership
+imports and report-only rebuilding. Downloader fixtures check safe extraction,
+complete snapshots, checksum invalidation, no-network completed reuse, subset
+mismatches, and preservation of a previous snapshot after an injected failed
+update. Existing Pfam outputs cannot be overwritten by a CDD resume.
+
+The browser test checks CDD model links in addition to the existing Pfam links,
+without changing carrier selection or cluster highlighting. The normal CI suite
+does not download CDD. To include the real search control locally, set
+`EET_CDD_TEST_DATABASE` to its prepared SMART validation snapshot and
+`EET_CDD_TEST_PROTEINS` to the four-control cluster directory, with the three NCBI
+executables on PATH. The optional test otherwise skips explicitly.
+
+Not performed: a complete Cdd_LE/NCBI-subset download through the new setup CLI,
+a scan of the user's cohort, an EET-function accuracy benchmark, a Conda solve,
+or a macOS execution test. A real SMART database and all needed metadata were
+downloaded from NCBI for the execution check; the larger downloader's archive and
+failure logic use controlled fixtures. CDD imported Pfam models are not counted
+as independent biological confirmation of the separate Pfam HMM analysis.

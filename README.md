@@ -8,6 +8,12 @@ Standalone analyses for an already selected collection of candidate EET-related 
    Pfam/custom HMM searches -> domain prevalence, repeated-domain statistics and
    within-protein co-occurrence networks. Single-file mode does not require clustering.
 
+**CDD analysis:** [CDD.md](CDD.md) documents `download_cdd.py` and `cluster_cdd.py`.
+Download a checksummed NCBI CDD snapshot, then produce the same cluster/collection
+domain summaries and interactive networks using RPS-BLAST and rpsbproc. CDD model
+names, hit types, source databases and NCBI links remain distinct from Pfam HMM
+results. Install the optional Conda packages `blast` and `rpsbproc` for these searches.
+
 **Genome-folder workflow:** [GENOME_WORKFLOW.md](GENOME_WORKFLOW.md) documents
 `genome_pipeline.py`: gene extraction -> clustering -> domains -> SignalP 4 and
 Phobius evidence, plus per-protein FeGenie/MHCscan motif counts. An existing SignalP
