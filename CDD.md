@@ -57,11 +57,19 @@ The database prefix is detected from the extracted files, not guessed from the
 archive's name. Safe extraction rejects links, devices, and traversal paths.
 
 `cdd_manifest.json` points to a completed snapshot beneath `snapshots/`. Successful
-`--resume` verifies and reuses that entire snapshot **without checking for updates**.
+`--resume` verifies and reuses its search data **without checking for updates**.
 An interrupted setup restarts its downloads; HTTP range resumption is not provided.
 `--force` creates a new snapshot and updates the manifest only after success, while
 preserving prior complete snapshots. Failed updates leave the prior manifest intact.
 The archive is removed after extraction unless `--keep-archive` is given.
+
+Search database and annotation-file checksum failures remain fatal. The two
+snapshot-root README copies are documentation: if missing or edited, validation
+warns after checking the scientific files, and records expected/actual documentation
+hashes and status in the analysis manifest. It does not rewrite the original
+snapshot manifest or download a new database. A README warning is not evidence
+that the database itself is absent or corrupt. Other missing/changed files are
+reported together so a missing snapshot can be distinguished from one missing file.
 
 The release file is checked before and after setup to detect a changing release.
 Some annotation files update independently of that release: timestamps and hashes

@@ -167,6 +167,50 @@ def test_snapshot_changed_model_invalidates(tmp_path):
     with pytest.raises(ValueError,match='changed'):setup.checked_snapshot(database)
 
 
+@pytest.mark.parametrize('change',['missing','edited'])
+def test_readme_drift_is_recorded_without_altering_snapshot(tmp_path,caplog,change):
+    argv,native,raw=args(tmp_path)
+    database=tmp_path/'CDD';manifest_path=database/'cdd_manifest.json'
+    original=json.loads(manifest_path.read_text())
+    for name in ['CDD_README.txt','rpsbproc_README.txt']:
+        p=database/'snapshot'/name;p.write_text('original documentation')
+        original['files'][str(p.relative_to(database))]=sha256(p)
+    dump(manifest_path,original);saved=manifest_path.read_bytes()
+    for name in ['CDD_README.txt','rpsbproc_README.txt']:
+        p=database/'snapshot'/name
+        if change=='missing':p.unlink()
+        else:p.write_text('edited documentation')
+    # Exercise the actual analysis path: all other snapshot checks still run.
+    assert cdd.main(argv)==0
+    output=json.loads((tmp_path/'out/manifest.json').read_text())
+    verification=output['database']['verification']
+    assert verification['search_annotation_files_verified']==len(original['files'])-2
+    assert len(verification['documentation'])==2
+    expected='missing' if change=='missing' else 'checksum_mismatch'
+    assert {r['status'] for r in verification['documentation']}=={expected}
+    assert all(r['expected_sha256'] for r in verification['documentation'])
+    assert 'documentation' in caplog.text and manifest_path.read_bytes()==saved
+
+
+def test_readme_warning_never_hides_corrupted_scientific_data(tmp_path):
+    database,_,_,_=fixture(tmp_path)
+    manifest_path=database/'cdd_manifest.json';m=json.loads(manifest_path.read_text())
+    m['files']['snapshot/CDD_README.txt']='0'*64;dump(manifest_path,m)
+    (database/'snapshot/db/Cdd.rps').write_text('corrupted')
+    (database/'snapshot/data/cddid.tbl').unlink()
+    with pytest.raises(ValueError) as error:setup.checked_snapshot(database)
+    assert 'Cdd.rps: checksum_mismatch' in str(error.value)
+    assert 'cddid.tbl: missing' in str(error.value)
+
+
+def test_only_known_snapshot_root_readmes_are_noncritical(tmp_path):
+    database,_,_,_=fixture(tmp_path)
+    manifest_path=database/'cdd_manifest.json';m=json.loads(manifest_path.read_text())
+    m['files']['snapshot/db/CDD_README.txt']='0'*64;dump(manifest_path,m)
+    with pytest.raises(ValueError,match='snapshot/db/CDD_README.txt: missing'):
+        setup.checked_snapshot(database)
+
+
 def test_download_complete_snapshot_resume_and_failed_update(tmp_path,monkeypatch):
     calls=[]
     def fetch(url,path):

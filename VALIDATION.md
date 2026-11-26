@@ -396,3 +396,22 @@ or a macOS execution test. A real SMART database and all needed metadata were
 downloaded from NCBI for the execution check; the larger downloader's archive and
 failure logic use controlled fixtures. CDD imported Pfam models are not counted
 as independent biological confirmation of the separate Pfam HMM analysis.
+
+## CDD documentation integrity fix (version 1.5.1)
+
+Snapshot-root `CDD_README.txt` and `rpsbproc_README.txt` copies are informational;
+missing/edited copies no longer block an otherwise verified search database.
+Checks still cover every scientific file recorded in the original manifest.
+Missing/changed database or annotation files remain fatal and are reported
+together, so a missing snapshot is not misdiagnosed as only a missing README.
+Documentation discrepancies retain expected/actual digests and status in the
+analysis manifest; the source snapshot manifest and its hashes are not edited.
+
+Four regression cases exercise missing and edited README copies through the
+analysis workflow, their warning/provenance records, unchanged source manifests,
+simultaneously missing/corrupted scientific inputs, and strict checking of an
+unexpected README-like filename outside the known snapshot-root locations.
+Local validation passed **130 tests**, with **9 explicitly skipped** because the
+external executables, browser, or optional downloaded-CDD control were unavailable.
+The user's database contents were not available here; the reported README absence
+was confirmed from the user's diagnostic output, not reproduced from their disk.
