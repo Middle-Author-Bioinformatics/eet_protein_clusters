@@ -6,6 +6,8 @@ dependencies:
   - python=3.11
   - mcl
   - diamond>=2.1
+  - mafft>=7.5
+  - fasttree>=2.1
   - biopython>=1.83
   - pyrodigal>=3.6,<4
   - pyhmmer>=0.11,<0.13
