@@ -57,6 +57,7 @@ def database_prefix(folder):
 
 
 def checked_snapshot(folder):
+    """Verify search inputs strictly; retain non-fatal documentation drift."""
     folder=Path(folder)
     path=folder/'cdd_manifest.json'
     if not path.is_file():raise ValueError(f'Missing {path}; run download_cdd.py first')
@@ -64,10 +65,31 @@ def checked_snapshot(folder):
     if data.get('schema')!=1:raise ValueError('Unsupported CDD snapshot manifest')
     for name in [*data['files'],data['db_prefix'],data['data_dir']]:
         if folder.resolve() not in (folder/name).resolve().parents:raise ValueError('CDD snapshot paths must stay inside its directory')
+    snapshot=PurePosixPath(data['data_dir']).parent
+    db_snapshot=PurePosixPath(data['db_prefix']).parent.parent
+    documentation={str(snapshot/name) for name in ['CDD_README.txt','rpsbproc_README.txt']} if snapshot==db_snapshot else set()
+    failures=[];doc_status=[];verified=0
     for name,digest in data['files'].items():
         p=folder/name
-        if not p.is_file() or sha256(p)!=digest:
-            raise ValueError(f'CDD snapshot missing/changed file: {name}; use download --force to create a new snapshot')
+        actual=sha256(p) if p.is_file() else None
+        status='verified' if actual==digest else ('missing' if actual is None else 'checksum_mismatch')
+        record=dict(path=name,status=status,expected_sha256=digest,actual_sha256=actual)
+        if name in documentation:
+            doc_status.append(record)
+        elif status!='verified':failures.append(record)
+        else:verified+=1
+    # Check all scientific files before deciding, rather than stopping at a README.
+    if failures:
+        details='; '.join(f'{r["path"]}: {r["status"]}' for r in failures[:8])
+        if len(failures)>8:details+=f'; and {len(failures)-8} more'
+        raise ValueError(f'CDD search/annotation files missing or changed ({len(failures)}): {details}. '
+                         'Check the CDD directory and restore the matching snapshot files. '
+                         'Use download --force only if the search data cannot be restored.')
+    for record in doc_status:
+        if record['status']!='verified':
+            LOG.warning('CDD documentation %s: %s; search/annotation checksums passed; original documentation checksum retained',record['status'],record['path'])
+    # Returned to the analysis manifest; the source snapshot manifest is unchanged.
+    data['verification']=dict(search_annotation_files_verified=verified,documentation=doc_status)
     return data
 
 
@@ -78,7 +100,7 @@ def setup(args):
         if not args.resume:raise ValueError('CDD already installed; use --resume to verify/reuse or --force for a new snapshot')
         old=checked_snapshot(args.output)
         if old['subset']!=args.subset:raise ValueError('Requested subset differs; choose another output folder or --force')
-        LOG.info('Verified existing snapshot: %s',old['release_info'].splitlines()[0]);return old
+        LOG.info('Verified existing search/annotation snapshot: %s',old['release_info'].splitlines()[0]);return old
     lock=args.output/'.download.lock'
     try:handle=lock.open('x')
     except FileExistsError:raise ValueError(f'Another setup may be active: {lock}; remove it only after checking no setup is running')
