@@ -1,5 +1,13 @@
 # Protein clustering and cluster-specific domain profiles
 
+**End-to-end protein-family workflow:** [PROTEIN_WORKFLOW.md](PROTEIN_WORKFLOW.md)
+documents `protein_pipeline.py`: one protein FASTA -> MCL (inflation 2) -> NR
+annotations -> Pfam (default) or CDD -> one protein/domain presence-absence table
+per cluster -> MAFFT alignments, audited HMM curation, family HMMs, and FastTree
+protein trees. It also connects the existing similarity and domain networks.
+MAFFT and FastTree are the additional executables; profile construction uses the
+already required PyHMMER. Tiny or uninformative families are explicitly flagged.
+
 Standalone analyses for an already selected collection of candidate EET-related proteins:
 
 1. **cluster_proteins.py**: protein FASTA -> DIAMOND all-versus-all similarity ->
